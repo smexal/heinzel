@@ -1,3 +1,6 @@
 packages:
   - apps/web
   - packages/*
+
+# Supply-chain protection: only install package versions published at least 24 h ago.
+minimumReleaseAge: 1440
