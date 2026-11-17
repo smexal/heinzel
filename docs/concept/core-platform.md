@@ -448,7 +448,29 @@ The core schema holds tenants, people, permissions and the generic work objects 
 | `notification` | user\_id, channel, template, payload, read\_at | In-app inbox and delivery log |
 | `audit_event` | actor\_id, client (UI/API/MCP), action, target, before/after, ip, at, prev\_hash, hash | Append-only, partitioned by month |
 
-All tenant-scoped tables carry `tenant_id`, `created_at`, `created_by`, `updated_at`, `updated_by`. IDs are UUIDv7 (time-ordered). Added after the design session: nav\_area (key, label, order, icon) for tenant navigation areas, inbox\_item (user, source module, kind task or notice, title, routing reason, actions, read\_at, done\_at) and user\_pref (theme, language, timezone, date format, time format, first day of week, number format; empty means tenant default).
+All tenant-scoped tables carry `tenant_id`, `created_at`, `created_by`, `updated_at`, `updated_by`. IDs are UUIDs (random v4 in Phase 1; time-ordered v7 once the API runs on Python 3.14). Added after the design session: nav\_area (key, label, order, icon) for tenant navigation areas, inbox\_item (user, source module, kind task or notice, title, routing reason, actions, read\_at, done\_at) and user\_pref (theme, language, timezone, date format, time format, first day of week, number format; empty means tenant default).
+
+## Implementation notes (Phase 1)
+
+The database, audit log, local login with TOTP and the protected web shell are built (repo commit 50edf08). Where the build refines the model above, this table records how.
+
+| Topic | Concept above | As built |
+| --- | --- | --- |
+| Schema | Core tables in one schema | Schema `core`; modules get `mod_<id>`. Migrations via Alembic, run as the schema owner (`heinzel migrate`) |
+| Database roles | RLS on `tenant_id` | The API connects as `heinzel_app` (no superuser, no BYPASSRLS, owns nothing). RLS is enabled and forced on every tenant table; each transaction sets `app.tenant_id` locally. Migrations call `tenant_table_security()` for new tables |
+| Tenant registry | `tenant` with config JSON | `core.tenant` holds slug, name and status only; the configuration stays in `tenants/<slug>/tenant.json` for now. Read-only for `heinzel_app` |
+| `user` | email, name, password\_hash, mfa\_secret, locale, active | Table `app_user`: unique per tenant on lower(email), status (invited, active, deactivated), failed\_logins, locked\_until, mfa\_enabled, mfa\_last\_step (TOTP replay guard), preferences (JSON, replaces a separate user\_pref table), last\_login\_at |
+| `permission` | Table of permission keys | No table: the catalogue is the core permissions (`core.users.manage`, `core.roles.manage`, `core.modules.manage`, `core.settings.manage`, `core.audit.read`) plus every module manifest. `role_permission` stores the keys per role |
+| System roles | Roles per tenant | Two system roles per tenant: `admin` holds the wildcard `*`; `staff` gets each module permission whose manifest lists `staff` in `default_roles` |
+| Sessions | Valkey | Table `core.session` in Postgres: SHA-256 of the cookie token, mfa\_passed, idle expiry (tenant `session_idle_hours`) and a 7-day absolute limit. Token rotates once the second factor is passed |
+| `audit_event` | actor, client, action, target, before/after, prev\_hash, hash; partitioned by month | Fields: actor\_user\_id, channel (web, api, mcp, system, cli), action, target\_type, target\_id, data (JSON), ip. Insert-only for `heinzel_app`, a trigger blocks UPDATE, DELETE and TRUNCATE for everyone. SHA-256 chain per tenant, serialised by an advisory lock; `heinzel verify-audit` checks it. Before/after values and monthly partitions follow with the first module writes |
+| MFA policy | TOTP enforceable per role | Tenant setting `mfa_required`: all, admins or optional. Seeds are Fernet-encrypted with a key derived from `HEINZEL_SECRET_KEY`; first login enrols via QR code |
+| Failed logins | Lockout and rate limiting | Lockout per tenant policy (Schmelzi: 5 attempts, 15 minutes). Unknown e-mail, wrong password and locked account get the same answer; the audit log keeps the real reason. Rate limiting per IP is still open (Valkey) |
+| CSRF | Not specified | SameSite=Lax cookie, JSON-only bodies, and writes are refused when `Origin` does not match the host |
+| Shell | Navigation by tenant config | `GET /api/v1/shell` returns branding to anyone (the login page needs it); navigation and quick actions only for a signed-in user, filtered by permission |
+| Tenant onboarding | `heinzel tenant create` | For now `heinzel seed-tenants` registers the `tenants/<slug>` folders and creates the system roles; `heinzel create-admin` creates the first administrator |
+
+The reverse proxy must keep the `Host` header and set `X-Forwarded-For`: the API resolves the tenant from the host and logs the client address from that header.
 
 ## Tech stack
 
@@ -462,7 +484,7 @@ SvelteKit in front, FastAPI behind, PostgreSQL at the centre. Everything runs as
 | ORM / migrations | SQLAlchemy 2, Alembic (one migration chain per module) | Mature; supports schema-per-module |
 | Database | PostgreSQL 17 with RLS | Tenant isolation in the database itself |
 | Jobs and events | Transactional outbox in Postgres + worker process | No extra broker for v1; reliable delivery |
-| Cache / sessions | Valkey (Redis-compatible) | Sessions, rate limits, short-lived cache |
+| Cache | Valkey (Redis-compatible) | Rate limits and short-lived cache; sessions live in Postgres (see Implementation notes) |
 | Object storage | S3-compatible, Swiss region | Attachments per tenant prefix |
 | Auth | Own auth: Argon2id (argon2-cffi), TOTP (pyotp); external OIDC via Authlib, SAML later | Works standalone; Entra ID plugs in by configuration |
 | Email / Teams | SMTP | Invites and password reset need mail from day one; no dependency on M365 |
