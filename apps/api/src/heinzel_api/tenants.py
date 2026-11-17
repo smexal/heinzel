@@ -37,6 +37,30 @@ class ModuleInstall(BaseModel):
     hidden_children: list[str] = []
 
 
+class Lockout(BaseModel):
+    attempts: int = 5
+    minutes: int = 15
+
+
+class LocalIdentity(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    enabled: bool = True
+    # all | admins | optional
+    mfa_required: str = "all"
+    password_min_length: int = Field(default=12, ge=8)
+    self_service_reset: bool = True
+    lockout: Lockout = Lockout()
+    session_idle_hours: int = Field(default=8, ge=1, le=24 * 30)
+
+
+class IdentityConfig(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    local: LocalIdentity = LocalIdentity()
+    providers: list[dict] = []
+
+
 class TenantConfig(BaseModel):
     """Only the parts the core reads so far are typed; everything else is kept as-is."""
 
@@ -48,6 +72,7 @@ class TenantConfig(BaseModel):
     short_name: str
     branding: Branding
     navigation: NavigationConfig = NavigationConfig()
+    identity: IdentityConfig = IdentityConfig()
     modules: list[ModuleInstall] = []
 
 

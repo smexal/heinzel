@@ -48,9 +48,11 @@ docs/           concept snapshots
 
 ```bash
 docker compose up -d                       # postgres, valkey, mailpit
-cd apps/api && uv sync && uv run uvicorn heinzel_api.main:app --reload --port 8000
+cd apps/api && uv sync && uv run heinzel migrate && uv run heinzel seed-tenants
+uv run heinzel create-admin --tenant schmelzi --email ... --name "..."
+uv run uvicorn heinzel_api.main:app --reload --port 8000
 pnpm install && pnpm dev:web               # http://localhost:5173
-cd apps/api && uv run pytest -q && uv run ruff check . && uv run ruff format --check .
+cd apps/api && uv run pytest -q && uv run ruff check . && uv run ruff format --check .   # pytest needs Postgres
 pnpm check:web && pnpm build:web
 ```
 
@@ -62,6 +64,22 @@ pnpm check:web && pnpm build:web
 - Svelte: runes only (`$state`, `$derived`, `$props`), `#lib/...` imports, component-scoped CSS on tokens.
 - Accessibility: real buttons/links/labels, 44 px touch targets, WCAG AA in light and dark.
 - Tests next to every feature: pytest for the API, `pnpm check` must stay green.
+- Database: schema `core` for the core, `mod_<id>` per module. Every tenant table gets
+  `tenant_id` and `tenant_table_security()` in its migration; add an isolation test.
+- Requests: `with tenant_session(db, tenant.id) as s:` per unit of work. Raise HTTP errors
+  after the block when the outcome must be committed anyway (e.g. failed-login counters).
+- Every write calls `audit.record(...)` in the same transaction.
+- Route protection: `Depends(require("<permission>"))`; `PrincipalDep` for "signed in".
+
+## Decisions taken during implementation
+
+- Sessions live in Postgres (`core.session`, token hash only), not Valkey: one store, RLS, simple
+  revocation. Revisit if load demands it.
+- TOTP seeds are Fernet-encrypted with a key derived from `HEINZEL_SECRET_KEY`.
+- Failed logins answer identically for unknown e-mail, wrong password and locked account; the
+  audit log has the real reason.
+- CSRF: SameSite=Lax cookie, JSON-only bodies, and a same-origin check on writes (`main.py`).
+  The reverse proxy must keep the `Host` header and set `X-Forwarded-For`; the API trusts both.
 
 ## Status and next steps (Phase 1: Foundation)
 
@@ -71,12 +89,16 @@ Done:
 - [x] Module manifest validation (contract checks) and loading
 - [x] `GET /api/v1/shell`: branding + navigation (top section, areas, admin) + quick actions
 - [x] Web shell: sidebar from the API, tenant logo light/dark, brand colours, light/dark mode, "powered by"
+- [x] Database: SQLAlchemy models + Alembic (schema `core`), runtime role `heinzel_app`, forced RLS, isolation tests
+- [x] Audit log: append-only (grants + trigger), hash chain per tenant, `heinzel verify-audit`
+- [x] Identity: local accounts (Argon2id), lockout, TOTP with replay protection, server-side sessions, `/me`
+- [x] RBAC: permissions from core catalogue + manifests, system roles `admin` (`*`) and `staff` (manifest defaults), shell filtered
+- [x] CLI: `heinzel migrate | seed-tenants | create-admin | verify-audit`
+- [x] Web: login (password, TOTP, MFA enrolment with QR), protected `(app)` routes, profile card, logout
 
 Next, in this order:
-- [ ] Database: SQLAlchemy models + Alembic for `tenant`, `user`, `role`, `permission`, `role_assignment`, `audit_event`; RLS policies; tenant-isolation tests
-- [ ] Identity: local accounts (Argon2id), TOTP, sessions, invite flow, password reset (mail via Mailpit in dev)
-- [ ] RBAC: permissions from manifests, role mapping, filter `/api/v1/shell` by permissions
-- [ ] Audit log with hash chain
+- [ ] Identity, part 2: invite flow, password reset, change password, reset MFA by admin (mail via Mailpit in dev)
+- [ ] Rate limiting for login per IP (Valkey)
 - [ ] Admin console: Benutzer & Rollen, Module, Einstellungen (Branding, Sprache & Region, Navigation, Anmeldung, E-Mail), Audit-Log
 - [ ] User preferences (Mein Profil › Sprache & Region) with tenant defaults and locks
 - [ ] Then Phase 2 engines (inbox, search, files), then the first module: Aufgaben

@@ -11,6 +11,16 @@ jobs:
     defaults:
       run:
         working-directory: apps/api
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: heinzel_test
+          POSTGRES_USER: heinzel
+          POSTGRES_PASSWORD: heinzel
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U heinzel" --health-interval 5s --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6

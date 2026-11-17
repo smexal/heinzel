@@ -15,7 +15,12 @@ dependencies = [
     "psycopg[binary]>=3.3",
     "argon2-cffi>=25.1",
     "pyotp>=2.12",
+    "cryptography>=46",
+    "segno>=1.6",
 ]
+
+[project.scripts]
+heinzel = "heinzel_api.cli:main"
 
 [dependency-groups]
 dev = ["pytest>=9.2", "httpx2>=2.16", "ruff>=0.17"]
@@ -28,6 +33,7 @@ build-backend = "hatchling.build"
 packages = ["src/heinzel_api"]
 
 [tool.pytest.ini_options]
+pythonpath = ["tests"]
 testpaths = ["tests"]
 
 [tool.ruff]

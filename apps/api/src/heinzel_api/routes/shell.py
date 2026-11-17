@@ -1,17 +1,19 @@
 """Shell endpoint: everything the web app needs to draw the frame for the current tenant.
 
-TODO(identity): filter navigation and quick actions by the user's permissions once
-identity and RBAC exist. Until then every enabled module is shown.
+Branding is public (the login page needs it). Navigation and quick actions are only
+returned for a signed-in user and only contain what that user may open.
 """
 
 import re
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from heinzel_api.deps import OptionalPrincipalDep, tenant_config
 from heinzel_api.manifests import Manifest
-from heinzel_api.tenants import TenantConfig, resolve_tenant
+from heinzel_api.tenants import TenantConfig
 
 router = APIRouter(prefix="/api/v1")
 
@@ -52,9 +54,16 @@ class ShellBranding(BaseModel):
     powered_by: bool
 
 
+class ShellUser(BaseModel):
+    display_name: str
+    email: str
+    initials: str
+
+
 class Shell(BaseModel):
     tenant: str
     branding: ShellBranding
+    user: ShellUser | None
     navigation: list[NavSection]
     quick_actions: list[QuickAction]
 
@@ -69,13 +78,26 @@ def _asset_url(tenant: TenantConfig, path: str | None) -> str | None:
     return f"/api/v1/tenants/{tenant.slug}/assets/{path.removeprefix('assets/')}"
 
 
-def _module_item(manifest: Manifest, hidden: list[str]) -> NavItem:
+ADMIN_ITEMS = [
+    ("users", "Benutzer & Rollen", "/admin/benutzer", "users", "core.users.manage"),
+    ("modules", "Module", "/admin/module", "grid", "core.modules.manage"),
+    ("settings", "Einstellungen", "/admin/einstellungen", "sliders", "core.settings.manage"),
+    ("audit", "Audit-Log", "/admin/audit", "shield", "core.audit.read"),
+]
+
+
+def _initials(name: str) -> str:
+    parts = [p for p in name.split() if p]
+    return "".join(p[0] for p in parts[:2]).upper() or "?"
+
+
+def _module_item(manifest: Manifest, hidden: list[str], perms: set[str]) -> NavItem:
     nav = manifest.navigation
     assert nav is not None
     children = [
         NavItem(key=c.path, label=_text(c.label), path=c.path, icon=c.icon)
         for c in nav.children
-        if c.path not in hidden
+        if c.path not in hidden and c.permission in perms
     ]
     return NavItem(
         key=manifest.id,
@@ -86,7 +108,22 @@ def _module_item(manifest: Manifest, hidden: list[str]) -> NavItem:
     )
 
 
-def build_shell(tenant: TenantConfig, manifests: dict[str, Manifest]) -> Shell:
+def build_shell(
+    tenant: TenantConfig,
+    manifests: dict[str, Manifest],
+    permissions: set[str] | frozenset[str] | None,
+    user: ShellUser | None = None,
+) -> Shell:
+    """permissions=None means anonymous: branding only."""
+    if permissions is None:
+        return Shell(
+            tenant=tenant.slug,
+            branding=_branding(tenant),
+            user=None,
+            navigation=[],
+            quick_actions=[],
+        )
+    perms = set(permissions)
     top = [
         NavItem(key="home", label="Übersicht", path="/", icon="home"),
         NavItem(key="inbox", label="Mein Eingang", path="/eingang", icon="inbox"),
@@ -98,12 +135,16 @@ def build_shell(tenant: TenantConfig, manifests: dict[str, Manifest]) -> Shell:
         manifest = manifests.get(install.key)
         if not install.enabled or manifest is None or manifest.navigation is None:
             continue
-        item = _module_item(manifest, install.hidden_children)
+        if manifest.navigation.entry.permission not in perms:
+            continue
+        item = _module_item(manifest, install.hidden_children, perms)
         if install.area is None:
             top.append(item)
         elif install.area in by_area:
             by_area[install.area].append(item)
         for qa in manifest.contributes.get("quick_actions", []):
+            if qa.get("permission", manifest.navigation.entry.permission) not in perms:
+                continue
             quick_actions.append(
                 QuickAction(
                     key=qa["key"], label=_text(qa["label"]), path=qa["path"], module=manifest.id
@@ -115,52 +156,48 @@ def build_shell(tenant: TenantConfig, manifests: dict[str, Manifest]) -> Shell:
         items = by_area[area.key]
         if items or not tenant.navigation.hide_empty_areas:
             sections.append(NavSection(key=area.key, label=_text(area.label), items=items))
-    sections.append(
-        NavSection(
-            key="admin",
-            label="Administration",
-            items=[
-                NavItem(
-                    key="users", label="Benutzer & Rollen", path="/admin/benutzer", icon="users"
-                ),
-                NavItem(key="modules", label="Module", path="/admin/module", icon="grid"),
-                NavItem(
-                    key="settings",
-                    label="Einstellungen",
-                    path="/admin/einstellungen",
-                    icon="sliders",
-                ),
-                NavItem(key="audit", label="Audit-Log", path="/admin/audit", icon="shield"),
-            ],
-        )
-    )
+    admin = [
+        NavItem(key=key, label=label, path=path, icon=icon)
+        for key, label, path, icon, perm in ADMIN_ITEMS
+        if perm in perms
+    ]
+    if admin:
+        sections.append(NavSection(key="admin", label="Administration", items=admin))
 
-    b = tenant.branding
     return Shell(
         tenant=tenant.slug,
-        branding=ShellBranding(
-            display_name=tenant.display_name,
-            short_name=tenant.short_name,
-            logo_light=_asset_url(tenant, b.logo_light) or "",
-            logo_dark=_asset_url(tenant, b.logo_dark),
-            logo_mark=_asset_url(tenant, b.logo_mark),
-            primary=b.colors["primary"],
-            accent=b.colors.get("accent", b.colors["primary"]),
-            theme_default=b.theme_default,
-            powered_by=b.powered_by,
-        ),
+        branding=_branding(tenant),
+        user=user,
         navigation=sections,
         quick_actions=quick_actions,
     )
 
 
+def _branding(tenant: TenantConfig) -> ShellBranding:
+    b = tenant.branding
+    return ShellBranding(
+        display_name=tenant.display_name,
+        short_name=tenant.short_name,
+        logo_light=_asset_url(tenant, b.logo_light) or "",
+        logo_dark=_asset_url(tenant, b.logo_dark),
+        logo_mark=_asset_url(tenant, b.logo_mark),
+        primary=b.colors["primary"],
+        accent=b.colors.get("accent", b.colors["primary"]),
+        theme_default=b.theme_default,
+        powered_by=b.powered_by,
+    )
+
+
 @router.get("/shell", response_model=Shell)
-def get_shell(request: Request) -> Shell:
-    host = request.headers.get("x-forwarded-host") or request.headers.get("host")
-    tenant = resolve_tenant(request.app.state.tenants, host)
-    if tenant is None:
-        raise HTTPException(status_code=404, detail="Unknown tenant")
-    return build_shell(tenant, request.app.state.manifests)
+def get_shell(
+    request: Request,
+    tenant: Annotated[TenantConfig, Depends(tenant_config)],
+    p: OptionalPrincipalDep,
+) -> Shell:
+    if p is None or not p.mfa_passed:
+        return build_shell(tenant, request.app.state.manifests, None)
+    user = ShellUser(display_name=p.display_name, email=p.email, initials=_initials(p.display_name))
+    return build_shell(tenant, request.app.state.manifests, p.permissions, user)
 
 
 @router.get("/tenants/{slug}/assets/{name}")

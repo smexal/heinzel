@@ -18,7 +18,9 @@ export default defineConfig({
 		})
 	],
 	server: {
-		// Browser requests to /api go to the FastAPI core in dev (logos, later all data).
-		proxy: { '/api': apiUrl }
+		// Browser requests to /api go to the FastAPI core in dev. Keep the Host header: the API
+		// resolves the tenant from it and checks it against the Origin of write requests.
+		// In production the reverse proxy does the same (proxy_set_header Host $host).
+		proxy: { '/api': { target: apiUrl, changeOrigin: false, xfwd: true } }
 	}
 });

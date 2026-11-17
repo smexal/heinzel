@@ -21,8 +21,16 @@ export type QuickAction = {
 	module: string;
 };
 
+export type ShellUser = {
+	display_name: string;
+	email: string;
+	initials: string;
+};
+
 export type Shell = {
 	tenant: string;
+	/** null when nobody is signed in: then navigation and quick_actions are empty */
+	user: ShellUser | null;
 	branding: {
 		display_name: string;
 		short_name: string;
