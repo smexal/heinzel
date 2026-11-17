@@ -1,0 +1,42 @@
+# Module manifest. Spec: docs/concept/modules/aufgaben.md
+id: aufgaben
+name: { de: Aufgaben, en: Tasks }
+version: 0.1.0
+core_api: ">=1.0 <2.0"
+runtime: in-process
+
+permissions:
+  - id: aufgaben.use
+    label: { de: Aufgaben nutzen }
+    default_roles: [staff]
+  - id: aufgaben.list.share
+    label: { de: Geteilte Listen erstellen }
+    default_roles: [staff]
+
+uses_core: [identity, permissions, inbox, notifications, audit, directory, search, files]
+
+navigation:
+  default_area: null            # top section, below Übersicht and Mein Eingang
+  entry: { label: { de: Aufgaben }, path: /aufgaben, icon: check-square, permission: aufgaben.use }
+  children: []                  # no sub-navigation by design
+
+contributes:
+  quick_actions:
+    - { key: aufgabe-erfassen, label: { de: Aufgabe erfassen }, path: "/aufgaben?neu=1", permission: aufgaben.use }
+  dashboard_widgets: [heute-faellig]
+  inbox_items: [task-assigned, task-completed]
+  search_providers: [tasks]
+
+events:
+  publishes: [aufgaben.task.assigned, aufgaben.task.completed]
+  subscribes: [core.user.deactivated]
+
+settings_schema: settings.schema.json   # tenant-level module settings
+
+mcp:
+  tools:
+    - { name: aufgaben.task.list, permission: aufgaben.use, annotations: { readOnlyHint: true } }
+    - { name: aufgaben.task.create, permission: aufgaben.use, annotations: { readOnlyHint: false, idempotentHint: true } }
+    - { name: aufgaben.task.complete, permission: aufgaben.use, annotations: { readOnlyHint: false, idempotentHint: true } }
+  resources: ["heinzel://aufgaben/lists/{id}"]
+  prompts: [heute-faellig]

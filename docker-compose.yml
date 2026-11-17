@@ -1,0 +1,28 @@
+# Local infrastructure for development. API and web run on the host (see README).
+name: heinzel
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: heinzel
+      POSTGRES_USER: heinzel
+      POSTGRES_PASSWORD: heinzel
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U heinzel"]
+      interval: 5s
+      retries: 10
+
+  valkey:
+    image: valkey/valkey:8-alpine
+    ports: ["6379:6379"]
+
+  mailpit:
+    # Catches all outgoing mail in dev: SMTP on 1025, web UI on http://localhost:8025
+    image: axllent/mailpit
+    ports: ["1025:1025", "8025:8025"]
+
+volumes:
+  pgdata:

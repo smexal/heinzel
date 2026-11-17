@@ -1,0 +1,13 @@
+{
+	"name": "heinzel",
+	"private": true,
+	"scripts": {
+		"dev:web": "pnpm --filter web dev",
+		"build:web": "pnpm --filter web build",
+		"check:web": "pnpm --filter web check",
+		"format": "pnpm --filter web format"
+	},
+	"engines": {
+		"node": ">=22.17"
+	}
+}

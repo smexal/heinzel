@@ -1,0 +1,60 @@
+{
+  "slug": "schmelzi",
+  "domains": ["heinzel.schmelzi.ch", "localhost"],
+  "display_name": "Stiftung Schmelzi",
+  "short_name": "Schmelzi",
+  "branding": {
+    "logo_light": "assets/logo-schmelzi.svg",
+    "logo_dark": "assets/logo-schmelzi-dark.svg",
+    "logo_mark": "assets/mark-schmelzi.svg",
+    "colors": { "primary": "#3B7084", "accent": "#BDCF1F" },
+    "theme_default": "system",
+    "powered_by": true
+  },
+  "legal": { "imprint_url": null, "privacy_url": null },
+  "localization": {
+    "languages": ["de-CH"],
+    "defaults": {
+      "language": "de-CH",
+      "timezone": "Europe/Zurich",
+      "date_format": "dd.MM.yyyy",
+      "time_format": "24h",
+      "first_day_of_week": "monday",
+      "number_format": "1'234.50",
+      "currency": "CHF"
+    },
+    "locked": ["timezone", "currency"]
+  },
+  "navigation": {
+    "hide_empty_areas": true,
+    "areas": [
+      { "key": "unterhalt", "label": { "de": "Unterhalt" }, "order": 10 },
+      { "key": "verwaltung", "label": { "de": "Verwaltung" }, "order": 20 },
+      { "key": "it", "label": { "de": "IT" }, "order": 30 }
+    ]
+  },
+  "identity": {
+    "local": {
+      "enabled": true,
+      "mfa_required": "all",
+      "password_min_length": 12,
+      "self_service_reset": true,
+      "lockout": { "attempts": 5, "minutes": 15 },
+      "session_idle_hours": 8
+    },
+    "providers": []
+  },
+  "email": {
+    "from_name": "Stiftung Schmelzi",
+    "from_address": "heinzel@schmelzi.ch",
+    "reply_to": "it@schmelzi.ch",
+    "smtp": {
+      "host": "localhost",
+      "port": 1025,
+      "security": "none",
+      "username": null,
+      "password_ref": null
+    }
+  },
+  "modules": [{ "key": "aufgaben", "enabled": true, "area": null, "hidden_children": [] }]
+}

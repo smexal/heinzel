@@ -1,0 +1,93 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/figtree';
+
+/*
+ * Design tokens. The tenant sets only --primary and --accent (from /api/v1/shell);
+ * everything else is derived here, for light and dark. Components use tokens only.
+ */
+:root {
+	--primary: #3b7084;
+	--accent: #bdcf1f;
+
+	--bg: #f7f4ee;
+	--side: #fffdf9;
+	--surface: #ffffff;
+	--surface-2: #fbf9f5;
+	--line: #e6e0d6;
+	--line-2: #efeae1;
+	--line-3: #f1ece4;
+	--hover: #f3efe8;
+	--input: #dcd5c9;
+	--ink: #1e2420;
+	--ink-2: #3a413c;
+	--muted: #5e655f;
+	--muted-2: #6b6f69;
+	--primary-hover: color-mix(in oklab, var(--primary) 80%, black);
+	--primary-tint: color-mix(in oklab, var(--primary) 13%, var(--surface));
+	--primary-strong: color-mix(in oklab, var(--primary) 78%, black);
+	--link: var(--primary);
+
+	/* semantic status colours, not brandable */
+	--ok-bg: #eef3cc;
+	--ok-ink: #4b5612;
+	--warn-bg: #fbefd5;
+	--warn-ink: #7a4e0e;
+	--danger-bg: #fbe6df;
+	--danger-ink: #9a3412;
+	--info-bg: #e4eefb;
+	--info-ink: #1e4f8a;
+
+	color-scheme: light;
+	font-family: 'Figtree Variable', system-ui, sans-serif;
+	color: var(--ink);
+	background: var(--bg);
+}
+
+:root[data-theme='dark'] {
+	--bg: #161a19;
+	--side: #1b1f1e;
+	--surface: #1f2423;
+	--surface-2: #242a28;
+	--line: #323937;
+	--line-2: #272d2b;
+	--line-3: #2c3230;
+	--hover: #2a302e;
+	--input: #3d4542;
+	--ink: #ecede8;
+	--ink-2: #cdd2cd;
+	--muted: #a6ada7;
+	--muted-2: #98a099;
+	--primary-hover: color-mix(in oklab, var(--primary) 85%, white);
+	--primary-tint: color-mix(in oklab, var(--primary) 30%, var(--surface));
+	--primary-strong: color-mix(in oklab, var(--primary) 45%, white);
+	--link: color-mix(in oklab, var(--primary) 45%, white);
+
+	--ok-bg: #2d3315;
+	--ok-ink: #d3e07a;
+	--warn-bg: #3a2f17;
+	--warn-ink: #ebc37a;
+	--danger-bg: #3d2119;
+	--danger-ink: #f2a68a;
+	--info-bg: #1c2a3d;
+	--info-ink: #9dbfea;
+
+	color-scheme: dark;
+}
+
+body {
+	margin: 0;
+}
+
+a {
+	color: var(--link);
+}
+
+.logo-dark {
+	display: none;
+}
+:root[data-theme='dark'] .logo-dark {
+	display: block;
+}
+:root[data-theme='dark'] .logo-light {
+	display: none;
+}
