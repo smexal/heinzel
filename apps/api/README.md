@@ -54,4 +54,7 @@ policies show and accept only that tenant's rows. Migrations of new tenant table
 | `PUT /api/v1/admin/settings/secure/{identity\|email}` | same, with step-up |
 | `PUT/DELETE /api/v1/admin/settings/branding/logos/{light\|dark\|mark}` | logo upload (raw body: SVG, PNG, WebP, ≤ 512 KB) |
 | `POST /api/v1/admin/settings/email/test` | test mail to the signed-in admin |
+| `GET /api/v1/admin/modules` | modules with status, area, children, permissions + roles, settings schema/values, MCP items |
+| `PUT /api/v1/admin/modules/{key}` | activate/deactivate, area, hidden children, settings (JSON Schema), `mcp_disabled` |
+| `PUT /api/v1/admin/settings/navigation` | areas in order (`key` null = new), `hide_empty_areas` |
 | `GET /api/v1/admin/roles` | roles with expanded permissions and the permission catalogue |

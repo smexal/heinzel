@@ -84,11 +84,13 @@
 				general: 'Allgemein',
 				branding: 'Branding',
 				localization: 'Sprache & Region',
+				navigation: 'Navigation',
 				identity: 'Anmeldung',
 				email: 'E-Mail'
 			};
 			return names[e.target_id ?? ''] ?? e.target_id ?? '';
 		}
+		if (e.target_type === 'module') return `Modul ${String(e.data.name ?? e.target_id ?? '')}`;
 		if (e.target_type === 'role') {
 			const n = e.data.name;
 			return `Rolle ${Array.isArray(n) ? n[n.length - 1] : (n ?? e.target_id ?? '')}`;

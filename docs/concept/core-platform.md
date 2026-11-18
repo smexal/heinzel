@@ -452,7 +452,7 @@ All tenant-scoped tables carry `tenant_id`, `created_at`, `created_by`, `updated
 
 ## Implementation notes (Phase 1)
 
-The database, audit log, local login with TOTP, the protected web shell, invitations, password reset, Benutzer & Rollen, the Audit-Log viewer and Mein Profil are built. Where the build refines the model above, this table records how.
+The database, audit log, local login with TOTP, the protected web shell, invitations, password reset, Benutzer & Rollen, the Audit-Log viewer, Mein Profil, Einstellungen and Module are built: Phase 1 is complete. Where the build refines the model above, this table records how.
 
 | Topic | Concept above | As built |
 | --- | --- | --- |
@@ -474,6 +474,7 @@ The database, audit log, local login with TOTP, the protected web shell, invitat
 | Granting roles | Admin assigns roles | Only roles whose permissions the admin holds can be granted. The last active admin cannot be deactivated or lose the admin role, and nobody can deactivate themselves. Deactivating ends all sessions; an MFA reset ends them and forces a new enrolment. Custom roles can be created, edited and deleted (only when nobody holds them); staff permissions are editable, admin is fixed. Role definitions and assignments need a step-up: a fresh TOTP code (or the password without 2FA), valid 10 minutes per session (session.step\_up\_at). Manifest default permissions are applied once per tenant (core.permission\_seeded), so a later seed never undoes an admin's removal |
 | Personal settings | user\_pref table; GET /me/preferences; MCP resource heinzel://me/preferences | Stored in app\_user.preferences (JSON, key localization). GET/PUT /api/v1/me/preferences returns own values, tenant defaults, locks and options; a locked setting is refused. The shell carries the effective values, and the web formats every date and number through one formatter. Theme is stored per browser, not per user. The MCP resource follows with the MCP gateway |
 | Audit viewer | Admins export per user for information requests | Filters for person, area (platform or module, by action prefix), channel, period and free text; paging by event id. CSV export with the same filters, itself recorded as audit.exported. The chain check runs on page load at most every 10 minutes per tenant; a scheduled check follows with the worker |
+| Module administration | Admin enables modules, assigns areas, edits module settings | Per tenant in config.modules: enabled (deactivating keeps the data), area, hidden sub-navigation, settings validated against settings.schema.json (JSON Schema 2020-12; x-enum-labels and x-group for the form), and mcp\_disabled for tools and prompts. The form is generated from the schema. Convention: quick\_action\_enabled, widget\_enabled and search\_enabled switch the module's contributions off. Areas are edited under Einstellungen › Navigation; an area a module still uses cannot be removed |
 
 The reverse proxy must keep the `Host` header and set `X-Forwarded-For`: the API resolves the tenant from the host and logs the client address from that header.
 

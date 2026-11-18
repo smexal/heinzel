@@ -150,6 +150,10 @@ def build_shell(
             top.append(item)
         elif install.area in by_area:
             by_area[install.area].append(item)
+        # Convention for module settings: quick_action_enabled switches its quick actions off.
+        module_settings = {**manifest.settings_defaults(), **install.settings}
+        if module_settings.get("quick_action_enabled", True) is False:
+            continue
         for qa in manifest.contributes.get("quick_actions", []):
             if qa.get("permission", manifest.navigation.entry.permission) not in perms:
                 continue

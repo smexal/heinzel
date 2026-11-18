@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { invalidateAll } from '$app/navigation';
+	import { page } from '$app/state';
 	import { ApiError, post, put, send } from '#lib/api.ts';
 	import { formatter, type Localization } from '#lib/format.ts';
 	import { StepUpCancelled, withStepUp } from '#lib/stepup.svelte.ts';
@@ -9,15 +10,21 @@
 
 	let { data }: PageProps = $props();
 
-	type Tab = 'general' | 'branding' | 'localization' | 'identity' | 'email';
+	type Tab = 'general' | 'branding' | 'localization' | 'navigation' | 'identity' | 'email';
 	const TABS: [Tab, string][] = [
 		['general', 'Allgemein'],
 		['branding', 'Branding'],
 		['localization', 'Sprache & Region'],
+		['navigation', 'Navigation'],
 		['identity', 'Anmeldung'],
 		['email', 'E-Mail']
 	];
-	let tab = $state<Tab>('general');
+	let tab = $state<Tab>(
+		untrack(() => {
+			const t = page.url.searchParams.get('tab');
+			return (TABS.find(([k]) => k === t)?.[0] ?? 'general') as Tab;
+		})
+	);
 
 	const s = $derived(data.settings);
 	const opt = $derived(data.settings.options);
@@ -29,6 +36,17 @@
 	let loc = $state(untrack(() => clone(data.settings.sections.localization)));
 	let ident = $state(untrack(() => clone(data.settings.sections.identity)));
 	let email = $state(untrack(() => clone(data.settings.sections.email)));
+	let nav = $state(untrack(() => navDraft(data.settings.sections.navigation)));
+
+	type NavDraft = { hide_empty_areas: boolean; areas: { key: string | null; label: string }[] };
+	function navDraft(n: Settings['sections']['navigation']): NavDraft {
+		return {
+			hide_empty_areas: n.hide_empty_areas,
+			areas: [...n.areas]
+				.sort((a, b) => a.order - b.order)
+				.map((a) => ({ key: a.key, label: a.label.de ?? Object.values(a.label)[0] ?? a.key }))
+		};
+	}
 	let smtpPassword = $state('');
 
 	function reset(sections: Settings['sections']) {
@@ -37,6 +55,7 @@
 		loc = clone(sections.localization);
 		ident = clone(sections.identity);
 		email = clone(sections.email);
+		nav = navDraft(sections.navigation);
 		smtpPassword = '';
 	}
 
@@ -54,6 +73,27 @@
 		main_logo_required: 'Das Hauptlogo ist nötig. Ersetze es stattdessen.'
 	};
 
+	function errorText(d: string): string | undefined {
+		if (d.startsWith('area_in_use:'))
+			return 'Ein Bereich wird noch von einem Modul verwendet. Verschiebe das Modul zuerst unter Module.';
+		return ERRORS[d];
+	}
+
+	// --- navigation -----------------------------------------------------------------------
+	function moveArea(i: number, delta: number) {
+		const j = i + delta;
+		if (j < 0 || j >= nav.areas.length) return;
+		const list = [...nav.areas];
+		[list[i], list[j]] = [list[j], list[i]];
+		nav.areas = list;
+	}
+	function addArea() {
+		nav.areas = [...nav.areas, { key: null, label: '' }];
+	}
+	function removeArea(i: number) {
+		nav.areas = nav.areas.filter((_, k) => k !== i);
+	}
+
 	async function run(action: () => Promise<unknown>, ok: string) {
 		busy = true;
 		message = null;
@@ -68,7 +108,7 @@
 			message = {
 				tone: 'error',
 				text:
-					ERRORS[d] ??
+					errorText(d) ??
 					(e instanceof ApiError && e.status === 422
 						? 'Bitte prüfe die Eingaben.'
 						: 'Speichern hat nicht geklappt. Bitte versuche es erneut.')
@@ -99,6 +139,7 @@
 					powered_by: branding.powered_by
 				});
 			if (section === 'localization') save('localization', loc);
+			if (section === 'navigation') save('navigation', nav);
 			if (section === 'identity') saveSecure('identity', ident);
 			if (section === 'email') {
 				const { password_set: _, ...smtp } = email.smtp;
@@ -466,6 +507,89 @@
 						<dt>Woche beginnt</dt>
 						<dd>{WEEKDAYS[loc.defaults.first_day_of_week]}</dd>
 					</dl>
+				</section>
+			</aside>
+			<div class="actions">
+				<button class="btn btn-primary" type="submit" disabled={busy}>Speichern</button>
+			</div>
+		</form>
+	{:else if tab === 'navigation'}
+		<form class="layout" onsubmit={submit('navigation')}>
+			<section class="card settings">
+				<div class="sec-head">
+					<h2>Bereiche</h2>
+					<p>
+						Bereiche gruppieren Module in der Seitenleiste. Welches Modul wo steht, legst du unter
+						<a href="/admin/module">Module</a> fest.
+					</p>
+				</div>
+				<ol class="areas">
+					{#each nav.areas as a, i (i)}
+						<li class="area">
+							<span class="pos">{i + 1}</span>
+							<label class="sr-only" for="area-{i}">Name des Bereichs {i + 1}</label>
+							<input id="area-{i}" class="input" required maxlength="60" bind:value={a.label} />
+							<button
+								class="icon-btn"
+								type="button"
+								aria-label="{a.label} nach oben"
+								disabled={i === 0}
+								onclick={() => moveArea(i, -1)}>↑</button
+							>
+							<button
+								class="icon-btn"
+								type="button"
+								aria-label="{a.label} nach unten"
+								disabled={i === nav.areas.length - 1}
+								onclick={() => moveArea(i, 1)}>↓</button
+							>
+							<button class="btn btn-link" type="button" onclick={() => removeArea(i)}
+								>Entfernen</button
+							>
+						</li>
+					{/each}
+				</ol>
+				<div>
+					<button class="btn btn-secondary" type="button" onclick={addArea}
+						>Bereich hinzufügen</button
+					>
+				</div>
+				<div class="srow">
+					<div class="sl">
+						<span class="lab">Leere Bereiche ausblenden</span><span class="hint"
+							>Bereiche ohne aktives Modul erscheinen nicht in der Seitenleiste</span
+						>
+					</div>
+					<div class="sc">
+						<label class="switch"
+							><input
+								type="checkbox"
+								role="switch"
+								bind:checked={nav.hide_empty_areas}
+							/>Ausblenden</label
+						>
+					</div>
+				</div>
+			</section>
+			<aside class="side">
+				<section class="card preview" aria-label="Vorschau Seitenleiste">
+					<h2>Vorschau Seitenleiste</h2>
+					<div class="sidebar">
+						{#each data.shell.navigation as sec (sec.key)}
+							{#if sec.key === 'top'}
+								{#each sec.items as item (item.key)}<span class="si">{item.label}</span>{/each}
+							{/if}
+						{/each}
+						{#each nav.areas as a, i (i)}
+							{@const items = data.shell.navigation.find((x) => x.key === a.key)?.items ?? []}
+							{#if items.length || !nav.hide_empty_areas}
+								<span class="sh">{a.label || 'Neuer Bereich'}</span>
+								{#each items as item (item.key)}<span class="si">{item.label}</span>{:else}<span
+										class="si empty">leer</span
+									>{/each}
+							{/if}
+						{/each}
+					</div>
 				</section>
 			</aside>
 			<div class="actions">
@@ -944,6 +1068,69 @@
 	}
 	.strong {
 		font-weight: 600;
+	}
+	.areas {
+		list-style: none;
+		margin: 0 0 12px;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+	.area {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+	.area .input {
+		flex: 1;
+	}
+	.pos {
+		width: 24px;
+		text-align: center;
+		color: var(--muted);
+		font-variant-numeric: tabular-nums;
+	}
+	.icon-btn {
+		display: inline-grid;
+		place-items: center;
+		width: 40px;
+		height: 40px;
+		border: 1px solid var(--input);
+		border-radius: 10px;
+		background: var(--surface);
+		color: var(--ink-2);
+		font-size: 16px;
+		cursor: pointer;
+	}
+	.icon-btn:disabled {
+		opacity: 0.4;
+		cursor: default;
+	}
+	.sidebar {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		padding: 10px;
+		border-radius: 10px;
+		background: var(--surface);
+		font-size: 14px;
+	}
+	.si {
+		padding: 6px 10px;
+		color: var(--ink-2);
+	}
+	.si.empty {
+		color: var(--muted-2);
+		font-style: italic;
+	}
+	.sh {
+		padding: 12px 10px 2px;
+		font-size: 11px;
+		font-weight: 600;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--muted-2);
 	}
 	.actions {
 		flex: 1 1 100%;

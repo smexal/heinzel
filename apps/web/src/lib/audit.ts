@@ -30,6 +30,9 @@ export const ACTION_LABELS: Record<string, string> = {
 	'settings.logo_removed': 'Logo entfernt',
 	'settings.test_mail': 'Test-E-Mail gesendet',
 	'settings.reset_from_seed': 'Einstellungen aus Vorlage zurückgesetzt',
+	'module.enabled': 'Modul aktiviert',
+	'module.disabled': 'Modul deaktiviert',
+	'module.changed': 'Modul geändert',
 	'tenant.registered': 'Mandant eingerichtet',
 	'audit.exported': 'Audit-Log exportiert'
 };

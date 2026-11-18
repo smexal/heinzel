@@ -13,6 +13,7 @@ from heinzel_api.ratelimit import RateLimiter, ValkeyRateLimiter
 from heinzel_api.routes import (
     account,
     admin_audit,
+    admin_modules,
     admin_settings,
     admin_users,
     auth,
@@ -65,6 +66,7 @@ def create_app(
     app.include_router(admin_users.router)
     app.include_router(admin_audit.router)
     app.include_router(admin_settings.router)
+    app.include_router(admin_modules.router)
     return app
 
 

@@ -1,10 +1,12 @@
 """Module manifests (heinzel.module.yaml): loading and validation of the module contract."""
 
+import json
 from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from jsonschema import Draft202012Validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 LocalizedText = dict[str, str]
 
@@ -43,6 +45,7 @@ class Manifest(BaseModel):
 
     id: str = Field(pattern=MODULE_ID)
     name: LocalizedText
+    description: LocalizedText = {}
     version: str
     core_api: str
     runtime: Literal["in-process"] = "in-process"
@@ -53,6 +56,27 @@ class Manifest(BaseModel):
     events: dict[str, list[str]] = {}
     settings_schema: str | None = None
     mcp: dict = {}
+
+    # Loaded from settings_schema (JSON Schema 2020-12) next to the manifest.
+    _settings_schema: dict | None = PrivateAttr(default=None)
+
+    @property
+    def settings_json_schema(self) -> dict | None:
+        return self._settings_schema
+
+    def settings_defaults(self) -> dict:
+        props = (self._settings_schema or {}).get("properties", {})
+        return {k: v["default"] for k, v in props.items() if "default" in v}
+
+    def validate_settings(self, values: dict) -> list[str]:
+        """Errors (empty when valid) for module settings against the module's schema."""
+        if self._settings_schema is None:
+            return [] if not values else ["module has no settings"]
+        validator = Draft202012Validator(self._settings_schema)
+        return [
+            f"{'.'.join(str(p) for p in e.absolute_path) or '(root)'}: {e.message}"
+            for e in validator.iter_errors(values)
+        ]
 
     @model_validator(mode="after")
     def _check_contract(self) -> "Manifest":
@@ -74,7 +98,13 @@ class Manifest(BaseModel):
 
 def load_manifest(path: Path) -> Manifest:
     with path.open(encoding="utf-8") as f:
-        return Manifest.model_validate(yaml.safe_load(f))
+        manifest = Manifest.model_validate(yaml.safe_load(f))
+    if manifest.settings_schema:
+        schema_path = path.parent / manifest.settings_schema
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        Draft202012Validator.check_schema(schema)
+        manifest._settings_schema = schema
+    return manifest
 
 
 def load_manifests(modules_dir: Path) -> dict[str, Manifest]:

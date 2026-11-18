@@ -25,6 +25,10 @@ export type Settings = {
 			defaults: Record<string, string>;
 			locked: string[];
 		};
+		navigation: {
+			hide_empty_areas: boolean;
+			areas: { key: string; label: Record<string, string>; order: number }[];
+		};
 		identity: {
 			local: {
 				enabled: boolean;

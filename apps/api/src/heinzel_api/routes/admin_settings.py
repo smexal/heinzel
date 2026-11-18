@@ -8,6 +8,7 @@ they decide who can log in and where password-reset links are sent.
 
 import hashlib
 import re
+import unicodedata
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -114,7 +115,18 @@ class EmailIn(BaseModel):
     smtp: SmtpIn
 
 
+class AreaIn(BaseModel):
+    key: str | None = Field(default=None, max_length=40)  # None = new area
+    label: str = Field(min_length=1, max_length=60)
+
+
+class NavigationIn(BaseModel):
+    hide_empty_areas: bool = True
+    areas: list[AreaIn] = Field(default_factory=list, max_length=20)
+
+
 SECTIONS: dict[str, type[BaseModel]] = {
+    "navigation": NavigationIn,
     "general": General,
     "branding": BrandingIn,
     "localization": LocalizationIn,
@@ -148,6 +160,7 @@ def _public(config: dict[str, Any]) -> dict[str, Any]:
         },
         "branding": branding,
         "localization": config.get("localization") or {},
+        "navigation": config.get("navigation") or {"hide_empty_areas": True, "areas": []},
         "identity": config.get("identity") or {},
         "email": email,
     }
@@ -205,6 +218,34 @@ def _validate_localization(v: LocalizationIn) -> dict[str, Any]:
     return v.model_dump(mode="json")
 
 
+def _area_key(label: str, taken: set[str]) -> str:
+    ascii_label = unicodedata.normalize("NFKD", label).encode("ascii", "ignore").decode()
+    base = re.sub(r"[^a-z0-9]+", "-", ascii_label.lower()).strip("-")[:30] or "bereich"
+    key, n = base, 2
+    while key in taken:
+        key, n = f"{base}-{n}", n + 1
+    return key
+
+
+def _navigation(nav: NavigationIn, config: dict[str, Any]) -> dict[str, Any]:
+    """Areas in the given order. Existing keys stay (modules point at them); new areas get
+    a key from their label. An area that a module still uses cannot be removed."""
+    old = {a["key"]: a for a in (config.get("navigation") or {}).get("areas", [])}
+    taken = {a.key for a in nav.areas if a.key}
+    if not taken <= set(old):
+        raise HTTPException(status_code=422, detail="unknown_area")
+    used = {m.get("area") for m in config.get("modules", []) if m.get("area")}
+    if missing := (used & set(old)) - taken:
+        raise HTTPException(status_code=409, detail="area_in_use:" + ",".join(sorted(missing)))
+    areas = []
+    for i, a in enumerate(nav.areas):
+        key = a.key or _area_key(a.label, taken | set(old))
+        taken.add(key)
+        label = {**(old.get(key, {}).get("label") or {}), "de": a.label.strip()}
+        areas.append({"key": key, "label": label, "order": (i + 1) * 10})
+    return {"hide_empty_areas": nav.hide_empty_areas, "areas": areas}
+
+
 def _apply(
     section: str, values: dict[str, Any], config: dict[str, Any], secret_key: str
 ) -> dict[str, Any]:
@@ -221,6 +262,8 @@ def _apply(
         new["branding"] = {**(config.get("branding") or {}), **model.model_dump(mode="json")}
     elif section == "localization":
         new["localization"] = _validate_localization(model)  # type: ignore[arg-type]
+    elif section == "navigation":
+        new["navigation"] = _navigation(model, config)  # type: ignore[arg-type]
     elif section == "identity":
         ident: IdentityIn = model  # type: ignore[assignment]
         providers = (config.get("identity") or {}).get("providers", [])

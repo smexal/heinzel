@@ -41,6 +41,10 @@ class ModuleInstall(BaseModel):
     enabled: bool = True
     area: str | None = None
     hidden_children: list[str] = []
+    # Values for the module's settings.schema.json (missing keys use the schema defaults)
+    settings: dict = {}
+    # MCP tools and prompts this tenant switched off for AI clients
+    mcp_disabled: list[str] = []
 
 
 class Lockout(BaseModel):

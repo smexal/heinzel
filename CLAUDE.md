@@ -76,6 +76,8 @@ pnpm check:web && pnpm build:web
 - Tenant configuration lives in the database. `heinzel seed-tenants` creates settings and assets only for new
   tenants; `--reset-config` overwrites them from `tenants/<slug>/` (discards portal changes). Domains are
   operator-managed (seed), not editable by tenant admins.
+- Module settings conventions: `quick_action_enabled`, `widget_enabled`, `search_enabled` switch the module's
+  contributions off; the shell already honours `quick_action_enabled`.
 - Uploaded logos get content-hashed names (cache busting) and are served with a sandbox CSP.
 - Sessions live in Postgres (`core.session`, token hash only), not Valkey: one store, RLS, simple
   revocation. Revisit if load demands it.
@@ -123,7 +125,13 @@ Done:
 - [x] Einstellungen: Allgemein, Branding (logos upload, colours, theme, powered by), Sprache & Region (defaults + locks),
       Anmeldung and E-Mail (step-up; SMTP password encrypted, test mail); optimistic versioning
 
+- [x] Module admin: activate/deactivate (data stays), area, sub-navigation, settings form generated from
+      settings.schema.json (`x-enum-labels`, `x-group`), MCP tools/prompts per tenant; Navigation tab (areas, order,
+      hide empty; areas in use cannot be removed)
+
+Phase 1 (core platform and admin console) is complete.
+
 Next, in this order:
-- [ ] Admin console, rest: Module (enable, area, sub-navigation, module settings from settings.schema.json) and
-      Navigation (areas) in Einstellungen
-- [ ] Then Phase 2 engines (inbox, search, files), then the first module: Aufgaben
+- [ ] Phase 2 engines: inbox, search, files (uploads with storage abstraction)
+- [ ] First module: Aufgaben (spec in docs/concept/modules/aufgaben.md)
+- [ ] MCP gateway (tools from manifests, respects permissions and `mcp_disabled`)

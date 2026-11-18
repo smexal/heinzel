@@ -1,5 +1,7 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { invalidateAll } from '$app/navigation';
+	import { page } from '$app/state';
 	import { ApiError, post, put, send } from '#lib/api.ts';
 	import { StepUpCancelled, withStepUp } from '#lib/stepup.svelte.ts';
 	import Icon from '#lib/components/Icon.svelte';
@@ -14,7 +16,9 @@
 	const invitedCount = $derived(data.users.filter((u) => u.status === 'invited').length);
 
 	// --- filters --------------------------------------------------------------------------
-	let tab = $state<'users' | 'roles'>('users');
+	let tab = $state<'users' | 'roles'>(
+		untrack(() => (page.url.searchParams.get('tab') === 'rollen' ? 'roles' : 'users'))
+	);
 	let query = $state('');
 	let roleFilter = $state('');
 	let statusFilter = $state('');

@@ -4,13 +4,40 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "assign_scope": { "type": "string", "enum": ["list_members", "tenant"], "default": "list_members", "title": "Zuweisen an" },
-    "reminder": { "type": "string", "enum": ["inbox", "inbox_and_email", "none"], "default": "inbox", "title": "Erinnerung bei Fälligkeit" },
-    "delete_done_after_months": { "type": ["integer", "null"], "enum": [6, 12, 24, null], "default": 24, "title": "Erledigte Aufgaben löschen nach (Monate, null = nie)" },
-    "personal_list_name": { "type": "string", "minLength": 1, "maxLength": 60, "default": "Meine Aufgaben", "title": "Name der persönlichen Liste" },
+    "assign_scope": {
+      "type": "string",
+      "enum": ["list_members", "tenant"],
+      "default": "list_members",
+      "title": "Zuweisen an",
+      "description": "Wem eine Aufgabe zugewiesen werden kann",
+      "x-enum-labels": { "list_members": "Nur Mitglieder der Liste", "tenant": "Alle Benutzer des Mandanten" }
+    },
+    "reminder": {
+      "type": "string",
+      "enum": ["inbox", "inbox_and_email", "none"],
+      "default": "inbox",
+      "title": "Erinnerung bei Fälligkeit",
+      "x-enum-labels": { "inbox": "Im Eingang am Fälligkeitstag", "inbox_and_email": "Im Eingang und per E-Mail", "none": "Keine Erinnerung" }
+    },
+    "delete_done_after_months": {
+      "type": ["integer", "null"],
+      "enum": [24, 12, 6, null],
+      "default": 24,
+      "title": "Erledigte Aufgaben löschen",
+      "description": "Gilt für alle Listen",
+      "x-enum-labels": { "24": "nach 24 Monaten", "12": "nach 12 Monaten", "6": "nach 6 Monaten", "null": "nie" }
+    },
+    "personal_list_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 60,
+      "default": "Meine Aufgaben",
+      "title": "Name der persönlichen Liste",
+      "description": "Wird für jeden Benutzer angelegt"
+    },
     "shared_lists_enabled": { "type": "boolean", "default": true, "title": "Geteilte Listen erlauben" },
-    "quick_action_enabled": { "type": "boolean", "default": true, "title": "Schnellaktion «Aufgabe erfassen»" },
-    "widget_enabled": { "type": "boolean", "default": true, "title": "Widget «Heute fällig»" },
-    "search_enabled": { "type": "boolean", "default": true, "title": "In der Suche anzeigen" }
+    "quick_action_enabled": { "type": "boolean", "default": true, "title": "Schnellaktion «Aufgabe erfassen»", "x-group": "Übersicht und Suche" },
+    "widget_enabled": { "type": "boolean", "default": true, "title": "Widget «Heute fällig»", "x-group": "Übersicht und Suche" },
+    "search_enabled": { "type": "boolean", "default": true, "title": "In der Suche anzeigen", "x-group": "Übersicht und Suche" }
   }
 }

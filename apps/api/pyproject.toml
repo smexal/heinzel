@@ -18,6 +18,7 @@ dependencies = [
     "cryptography>=46",
     "segno>=1.6",
     "redis>=6",
+    "jsonschema>=4.23",
 ]
 
 [project.scripts]
