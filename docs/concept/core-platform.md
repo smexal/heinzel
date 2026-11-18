@@ -452,7 +452,7 @@ All tenant-scoped tables carry `tenant_id`, `created_at`, `created_by`, `updated
 
 ## Implementation notes (Phase 1)
 
-The database, audit log, local login with TOTP and the protected web shell are built (repo commit 50edf08). Where the build refines the model above, this table records how.
+The database, audit log, local login with TOTP, the protected web shell, invitations, password reset and the Benutzer & Rollen screen are built. Where the build refines the model above, this table records how.
 
 | Topic | Concept above | As built |
 | --- | --- | --- |
@@ -465,10 +465,13 @@ The database, audit log, local login with TOTP and the protected web shell are b
 | Sessions | Valkey | Table `core.session` in Postgres: SHA-256 of the cookie token, mfa\_passed, idle expiry (tenant `session_idle_hours`) and a 7-day absolute limit. Token rotates once the second factor is passed |
 | `audit_event` | actor, client, action, target, before/after, prev\_hash, hash; partitioned by month | Fields: actor\_user\_id, channel (web, api, mcp, system, cli), action, target\_type, target\_id, data (JSON), ip. Insert-only for `heinzel_app`, a trigger blocks UPDATE, DELETE and TRUNCATE for everyone. SHA-256 chain per tenant, serialised by an advisory lock; `heinzel verify-audit` checks it. Before/after values and monthly partitions follow with the first module writes |
 | MFA policy | TOTP enforceable per role | Tenant setting `mfa_required`: all, admins or optional. Seeds are Fernet-encrypted with a key derived from `HEINZEL_SECRET_KEY`; first login enrols via QR code |
-| Failed logins | Lockout and rate limiting | Lockout per tenant policy (Schmelzi: 5 attempts, 15 minutes). Unknown e-mail, wrong password and locked account get the same answer; the audit log keeps the real reason. Rate limiting per IP is still open (Valkey) |
+| Failed logins | Lockout and rate limiting | Lockout per tenant policy (Schmelzi: 5 attempts, 15 minutes). Unknown e-mail, wrong password and locked account get the same answer; the audit log keeps the real reason. Rate limits per IP in Valkey cover login, TOTP, forgotten password and links; they fail open if Valkey is down. Wrong TOTP codes count toward the lockout |
 | CSRF | Not specified | SameSite=Lax cookie, JSON-only bodies, and writes are refused when `Origin` does not match the host |
 | Shell | Navigation by tenant config | `GET /api/v1/shell` returns branding to anyone (the login page needs it); navigation and quick actions only for a signed-in user, filtered by permission |
 | Tenant onboarding | `heinzel tenant create` | For now `heinzel seed-tenants` registers the `tenants/<slug>` folders and creates the system roles; `heinzel create-admin` creates the first administrator |
+| Invitations and reset | Admin invites by e-mail; users reset forgotten passwords themselves | Table core.action\_token (SHA-256 of the link token, purpose invite or password\_reset, single use). Invitation links last 7 days, reset links 1 hour; a new link replaces the open one. Both open /konto/\<token>. Setting the password activates invited users and ends all sessions. "Forgot password" always answers the same, whether or not the address exists |
+| E-mail | SMTP, templates per tenant and language; delivery through the outbox | SMTP from tenant.json, sent right after the commit; a failure is shown to the admin (mail\_sent false) and never rolls back the change. Passwords are referenced as env:VARIABLE. German plain-text templates in code for now; outbox, retries and tenant templates follow with the worker |
+| Granting roles | Admin assigns roles | Only roles whose permissions the admin holds can be granted. The last active admin cannot be deactivated or lose the admin role, and nobody can deactivate themselves. Deactivating ends all sessions; an MFA reset ends them and forces a new enrolment. Custom roles and step-up 2FA for role changes are still open |
 
 The reverse proxy must keep the `Host` header and set `X-Forwarded-For`: the API resolves the tenant from the host and logs the client address from that header.
 

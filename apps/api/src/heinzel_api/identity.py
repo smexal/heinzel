@@ -18,7 +18,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from heinzel_api import crypto
-from heinzel_api.models import User, UserSession
+from heinzel_api.models import ActionToken, User, UserSession
 from heinzel_api.tenants import LocalIdentity
 
 _hasher = PasswordHasher()  # Argon2id with the library's current recommended parameters
@@ -26,6 +26,8 @@ _hasher = PasswordHasher()  # Argon2id with the library's current recommended pa
 _DUMMY_HASH = _hasher.hash("heinzel-dummy-password")
 
 SESSION_ABSOLUTE = timedelta(days=7)
+INVITE_TTL = timedelta(days=7)
+RESET_TTL = timedelta(hours=1)
 SESSION_TOUCH_EVERY = timedelta(minutes=1)
 TOTP_ISSUER = "Heinzel"
 MFA_PURPOSE = "totp"
@@ -118,6 +120,20 @@ def check_password(
     return LoginResult.OK, user
 
 
+def second_factor_failed(session: Session, user: User, policy: LocalIdentity) -> bool:
+    """Count a wrong TOTP code like a wrong password. Returns True when the account locked
+    (all sessions end, the password has to be entered again after the lockout)."""
+    user.failed_logins += 1
+    if user.failed_logins >= policy.lockout.attempts:
+        user.locked_until = datetime.now(UTC) + timedelta(minutes=policy.lockout.minutes)
+        user.failed_logins = 0
+        end_all_sessions(session, user.id)
+        session.flush()
+        return True
+    session.flush()
+    return False
+
+
 def mfa_required(user: User, policy: LocalIdentity, is_admin: bool) -> bool:
     if user.mfa_enabled:
         return True
@@ -154,6 +170,7 @@ def verify_totp(user: User, code: str, secret_key: str, at: float | None = None)
             continue
         if totp.verify(code, for_time=step * totp.interval, valid_window=0):
             user.mfa_last_step = step
+            user.failed_logins = 0
             return True
     return False
 
@@ -228,3 +245,100 @@ def end_all_sessions(session: Session, user_id: UUID, keep: UUID | None = None) 
     if keep is not None:
         stmt = stmt.where(UserSession.id != keep)
     session.execute(stmt)
+
+
+# --- One-time tokens: invitation and password reset -------------------------------------
+
+TOKEN_TTL = {"invite": INVITE_TTL, "password_reset": RESET_TTL}
+
+
+def issue_action_token(
+    session: Session, user: User, purpose: str, created_by: UUID | None = None
+) -> str:
+    """Create a one-time token and invalidate older open tokens of the same purpose."""
+    now = datetime.now(UTC)
+    session.execute(
+        delete(ActionToken).where(
+            ActionToken.user_id == user.id,
+            ActionToken.purpose == purpose,
+            ActionToken.used_at.is_(None),
+        )
+    )
+    token = crypto.new_token()
+    session.add(
+        ActionToken(
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            purpose=purpose,
+            token_hash=crypto.token_hash(token),
+            created_by=created_by,
+            expires_at=now + TOKEN_TTL[purpose],
+        )
+    )
+    session.flush()
+    return token
+
+
+def find_action_token(session: Session, token: str) -> tuple[ActionToken, User] | None:
+    """A token that is unused, unexpired and belongs to a user it may still act on."""
+    row = session.scalar(
+        select(ActionToken).where(ActionToken.token_hash == crypto.token_hash(token))
+    )
+    if row is None or row.used_at is not None or row.expires_at <= datetime.now(UTC):
+        return None
+    user = session.get(User, row.user_id)
+    if user is None or user.status == "deactivated":
+        return None
+    if row.purpose == "invite" and user.status != "invited":
+        return None
+    if row.purpose == "password_reset" and user.status != "active":
+        return None
+    return row, user
+
+
+def set_password_with_token(
+    session: Session, token: str, password: str, policy: LocalIdentity
+) -> tuple[ActionToken, User] | None:
+    """Redeem a token: set the password, activate invited users, end all sessions."""
+    found = find_action_token(session, token)
+    if found is None:
+        return None
+    row, user = found
+    user.password_hash = hash_password(password, policy)
+    user.failed_logins = 0
+    user.locked_until = None
+    if row.purpose == "invite":
+        user.status = "active"
+    row.used_at = datetime.now(UTC)
+    end_all_sessions(session, user.id)
+    session.flush()
+    return row, user
+
+
+def change_password(
+    session: Session,
+    user: User,
+    current: str,
+    new: str,
+    policy: LocalIdentity,
+    keep_session: UUID | None,
+) -> bool:
+    if user.password_hash is None:
+        return False
+    try:
+        _hasher.verify(user.password_hash, current)
+    except (VerificationError, InvalidHashError):
+        return False
+    user.password_hash = hash_password(new, policy)
+    end_all_sessions(session, user.id, keep=keep_session)
+    session.flush()
+    return True
+
+
+def reset_mfa(session: Session, user: User) -> None:
+    """Admin action: the user enrols a new authenticator at the next login."""
+    user.mfa_enabled = False
+    user.mfa_secret = None
+    user.mfa_last_step = None
+    end_all_sessions(session, user.id)
+    session.flush()

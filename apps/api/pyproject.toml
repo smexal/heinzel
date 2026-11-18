@@ -17,6 +17,7 @@ dependencies = [
     "pyotp>=2.12",
     "cryptography>=46",
     "segno>=1.6",
+    "redis>=6",
 ]
 
 [project.scripts]

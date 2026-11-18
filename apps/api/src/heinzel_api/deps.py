@@ -13,6 +13,7 @@ from heinzel_api import identity, rbac
 from heinzel_api.db import global_session, tenant_session
 from heinzel_api.manifests import Manifest
 from heinzel_api.models import Tenant
+from heinzel_api.ratelimit import Limit
 from heinzel_api.tenants import TenantConfig, resolve_tenant
 
 SESSION_COOKIE = "heinzel_session"
@@ -59,6 +60,22 @@ def client_ip(request: Request) -> str | None:
         return str(ipaddress.ip_address(raw)) if raw else None
     except ValueError:
         return None
+
+
+def public_url(request: Request, path: str) -> str:
+    """Absolute link for e-mails. The host is one of the tenant's domains (the tenant was
+    resolved from it), so a forged Host header cannot point links elsewhere."""
+    host = request_host(request) or "localhost"
+    scheme = "https" if request.app.state.settings.secure_cookies else "http"
+    return f"{scheme}://{host}{path}"
+
+
+def rate_limit(request: Request, limit: Limit, tenant_slug: str) -> None:
+    retry = request.app.state.ratelimiter.hit(limit, f"{tenant_slug}:{client_ip(request)}")
+    if retry is not None:
+        raise HTTPException(
+            status_code=429, detail="rate_limited", headers={"Retry-After": str(retry)}
+        )
 
 
 def db_factory(request: Request) -> sessionmaker[Session]:

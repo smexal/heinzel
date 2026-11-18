@@ -75,6 +75,12 @@ pnpm check:web && pnpm build:web
 
 - Sessions live in Postgres (`core.session`, token hash only), not Valkey: one store, RLS, simple
   revocation. Revisit if load demands it.
+- Mail is sent synchronously after commit (`heinzel_api.mail`); failures are reported (`mail_sent: false`) and
+  logged. Replace with the outbox + worker when the worker exists. SMTP passwords are referenced as
+  `env:VAR` in tenant.json, never stored there.
+- Admins can only grant roles whose permissions they hold themselves; the last active admin cannot be
+  deactivated or lose the admin role; nobody can deactivate themselves.
+- Rate limiting fails open when Valkey is down (lockout still applies).
 - TOTP seeds are Fernet-encrypted with a key derived from `HEINZEL_SECRET_KEY`.
 - Failed logins answer identically for unknown e-mail, wrong password and locked account; the
   audit log has the real reason.
@@ -95,10 +101,11 @@ Done:
 - [x] RBAC: permissions from core catalogue + manifests, system roles `admin` (`*`) and `staff` (manifest defaults), shell filtered
 - [x] CLI: `heinzel migrate | seed-tenants | create-admin | verify-audit`
 - [x] Web: login (password, TOTP, MFA enrolment with QR), protected `(app)` routes, profile card, logout
+- [x] Identity, part 2: invitations, forgotten password, reset links (`/konto/<token>`), change password (API), MFA reset by admin; mail via SMTP (Mailpit in dev)
+- [x] Rate limits per IP in Valkey (login, TOTP, forgot password, token links); wrong TOTP codes count toward lockout
+- [x] Admin: Benutzer & Rollen (list, filter, invite, resend, roles, deactivate/activate, 2FA reset; read-only permission matrix)
 
 Next, in this order:
-- [ ] Identity, part 2: invite flow, password reset, change password, reset MFA by admin (mail via Mailpit in dev)
-- [ ] Rate limiting for login per IP (Valkey)
-- [ ] Admin console: Benutzer & Rollen, Module, Einstellungen (Branding, Sprache & Region, Navigation, Anmeldung, E-Mail), Audit-Log
-- [ ] User preferences (Mein Profil › Sprache & Region) with tenant defaults and locks
+- [ ] Admin console, rest: Audit-Log viewer, custom roles (create/edit; step-up 2FA for role changes as in the design), Module, Einstellungen (Branding, Sprache & Region, Navigation, Anmeldung, E-Mail)
+- [ ] Mein Profil: Sprache & Region with tenant defaults and locks, change password (API exists)
 - [ ] Then Phase 2 engines (inbox, search, files), then the first module: Aufgaben

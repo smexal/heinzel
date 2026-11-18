@@ -185,4 +185,31 @@ class AuditEvent(Base):
     hash: Mapped[str] = mapped_column(String(64), nullable=False)
 
 
-TENANT_TABLES = ["app_user", "role", "role_permission", "role_assignment", "session", "audit_event"]
+class ActionToken(Base):
+    """One-time link token (invitation, password reset). Only the SHA-256 is stored."""
+
+    __tablename__ = "action_token"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = _tenant_fk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("app_user.id", ondelete="CASCADE"), nullable=False
+    )
+    # invite | password_reset
+    purpose: Mapped[str] = mapped_column(String(20), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    created_at: Mapped[datetime] = _created()
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+TENANT_TABLES = [
+    "app_user",
+    "role",
+    "role_permission",
+    "role_assignment",
+    "session",
+    "audit_event",
+    "action_token",
+]

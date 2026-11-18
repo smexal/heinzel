@@ -18,7 +18,7 @@ import segno
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
-from heinzel_api import audit, identity, rbac
+from heinzel_api import audit, identity, ratelimit, rbac
 from heinzel_api.db import tenant_session
 from heinzel_api.deps import (
     SESSION_COOKIE,
@@ -28,6 +28,7 @@ from heinzel_api.deps import (
     TenantContext,
     TenantDep,
     client_ip,
+    rate_limit,
 )
 from heinzel_api.identity import LoginResult
 from heinzel_api.models import User, UserSession
@@ -97,6 +98,7 @@ def login(
 ) -> StepOut:
     if not tenant.policy.enabled:
         raise HTTPException(status_code=403, detail="local_login_disabled")
+    rate_limit(request, ratelimit.LOGIN, tenant.config.slug)
     ip = client_ip(request)
     # Commit the outcome (failed-login counter, audit) before answering, also on failure.
     with tenant_session(db, tenant.id) as s:
@@ -155,6 +157,7 @@ def totp(
     p = _pending(p)
     if p.mfa_passed:
         return StepOut(next="done")
+    rate_limit(request, ratelimit.LOGIN, tenant.config.slug)
     ok = False
     with tenant_session(db, tenant.id) as s:
         user = s.get(User, p.user_id)
@@ -167,11 +170,13 @@ def totp(
             _elevate(request, response, tenant, s, user, old)
             audit.record(s, tenant.id, "auth.login", actor_user_id=user.id, ip=client_ip(request))
         else:
+            locked = identity.second_factor_failed(s, user, tenant.policy)
             audit.record(
                 s,
                 tenant.id,
                 "auth.totp_failed",
                 actor_user_id=user.id,
+                data={"locked": locked},
                 ip=client_ip(request),
             )
     if not ok:
@@ -214,7 +219,9 @@ def mfa_confirm(
         user = s.get(User, p.user_id)
         old = s.get(UserSession, p.session_id)
         assert user is not None and old is not None
-        if identity.verify_totp(user, body.code, request.app.state.settings.secret_key):
+        if not identity.verify_totp(user, body.code, request.app.state.settings.secret_key):
+            identity.second_factor_failed(s, user, tenant.policy)
+        else:
             ok = True
             user.mfa_enabled = True
             audit.record(

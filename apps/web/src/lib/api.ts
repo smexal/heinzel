@@ -10,9 +10,17 @@ export class ApiError extends Error {
 	}
 }
 
-export async function post<T>(path: string, body?: unknown): Promise<T> {
+export function post<T>(path: string, body?: unknown): Promise<T> {
+	return send<T>('POST', path, body);
+}
+
+export function put<T>(path: string, body?: unknown): Promise<T> {
+	return send<T>('PUT', path, body);
+}
+
+async function send<T>(method: string, path: string, body?: unknown): Promise<T> {
 	const res = await fetch(`/api/v1${path}`, {
-		method: 'POST',
+		method,
 		headers: body === undefined ? {} : { 'content-type': 'application/json' },
 		body: body === undefined ? undefined : JSON.stringify(body),
 		credentials: 'same-origin'

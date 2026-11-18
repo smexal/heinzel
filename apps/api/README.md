@@ -35,3 +35,12 @@ policies show and accept only that tenant's rows. Migrations of new tenant table
 | `POST /api/v1/auth/mfa/setup`, `/mfa/confirm` | TOTP enrolment (QR as SVG data URI) |
 | `POST /api/v1/auth/logout` | |
 | `GET /api/v1/me` | user, roles, permissions, effective localisation |
+| `POST /api/v1/me/password` | change own password (other sessions end) |
+| `POST /api/v1/auth/password/forgot` | always 202; mails a reset link to active users |
+| `GET /api/v1/auth/token/{token}` | what an invitation or reset link is for |
+| `POST /api/v1/auth/password/set` | redeem the link: set password, activate invited users |
+| `GET /api/v1/admin/users` | users with roles, MFA state, last login (`core.users.manage`) |
+| `POST /api/v1/admin/users` | invite (mail with a 7-day link) |
+| `POST /api/v1/admin/users/{id}/invite \| deactivate \| activate \| mfa-reset` | |
+| `PUT /api/v1/admin/users/{id}/roles` | replace role assignments |
+| `GET /api/v1/admin/roles` | roles with expanded permissions and the permission catalogue |

@@ -7,14 +7,20 @@ from fastapi.responses import JSONResponse
 from heinzel_api import __version__
 from heinzel_api.config import Settings, get_settings
 from heinzel_api.db import make_sessionmaker
+from heinzel_api.mail import Mailer, SmtpMailer
 from heinzel_api.manifests import load_manifests
-from heinzel_api.routes import auth, health, me, shell
+from heinzel_api.ratelimit import RateLimiter, ValkeyRateLimiter
+from heinzel_api.routes import account, admin_users, auth, health, me, shell
 from heinzel_api.tenants import load_tenants
 
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    mailer: Mailer | None = None,
+    ratelimiter: RateLimiter | None = None,
+) -> FastAPI:
     settings = settings or get_settings()
     settings.check()
 
@@ -25,6 +31,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.tenants = load_tenants(settings.tenants_dir)
         app.state.tenant_ids = {}
         app.state.db = make_sessionmaker(settings.database_url)
+        app.state.mailer = mailer or SmtpMailer()
+        app.state.ratelimiter = ratelimiter or ValkeyRateLimiter(settings.valkey_url)
         yield
 
     app = FastAPI(title="Heinzel API", version=__version__, lifespan=lifespan)
@@ -44,6 +52,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(shell.router)
     app.include_router(auth.router)
     app.include_router(me.router)
+    app.include_router(account.router)
+    app.include_router(admin_users.router)
     return app
 
 

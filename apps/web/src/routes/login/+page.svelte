@@ -2,7 +2,7 @@
 	import { goto, invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
 	import { ApiError, post, safeNext } from '#lib/api.ts';
-	import Leprechaun from '#lib/components/Leprechaun.svelte';
+	import AuthCard from '#lib/components/AuthCard.svelte';
 	import type { PageProps } from './$types';
 
 	type Step = 'credentials' | 'totp' | 'mfa_setup';
@@ -25,8 +25,11 @@
 		invalid_code: 'Der Code stimmt nicht. Bitte den aktuellen Code aus der App eingeben.',
 		local_login_disabled: 'Die Anmeldung mit Passwort ist für diese Organisation deaktiviert.',
 		not_authenticated: 'Die Anmeldung ist abgelaufen. Bitte erneut anmelden.',
-		cross_origin: 'Die Anfrage wurde aus Sicherheitsgründen abgelehnt.'
+		cross_origin: 'Die Anfrage wurde aus Sicherheitsgründen abgelehnt.',
+		rate_limited: 'Zu viele Versuche. Bitte warte einige Minuten und versuche es dann erneut.'
 	};
+
+	const done = $derived(page.url.searchParams.get('passwort') === 'gesetzt');
 
 	async function run(action: () => Promise<void>) {
 		busy = true;
@@ -82,147 +85,88 @@
 
 <svelte:head><title>Anmelden · {b.display_name}</title></svelte:head>
 
-<div class="wrap">
-	<main class="card">
-		<img class="logo logo-light" src={b.logo_light} alt={b.display_name} />
-		{#if b.logo_dark}<img class="logo logo-dark" src={b.logo_dark} alt={b.display_name} />{/if}
-
-		{#if step === 'credentials'}
-			<h1>Anmelden</h1>
-			<form onsubmit={submitCredentials}>
-				<label>
-					<span>E-Mail</span>
-					<input type="email" autocomplete="username" required bind:value={email} disabled={busy} />
-				</label>
-				<label>
-					<span>Passwort</span>
-					<input
-						type="password"
-						autocomplete="current-password"
-						required
-						bind:value={password}
-						disabled={busy}
-					/>
-				</label>
-				{#if message}<p class="msg" role="alert">{message}</p>{/if}
-				<button class="primary" type="submit" disabled={busy}>Weiter</button>
-			</form>
-		{:else}
-			{#if step === 'totp'}
-				<h1>Bestätigungscode</h1>
-				<p class="lead">Gib den 6-stelligen Code aus deiner Authenticator-App ein.</p>
-			{:else}
-				<h1>Zwei-Faktor einrichten</h1>
-				<p class="lead">
-					Scanne den QR-Code mit einer Authenticator-App (z. B. Microsoft Authenticator) und gib
-					danach den angezeigten Code ein.
-				</p>
-				{#if setup}
-					<img class="qr" src={setup.qr_svg} alt="QR-Code für die Authenticator-App" />
-					<details>
-						<summary>Code kann nicht gescannt werden?</summary>
-						<p>Schlüssel manuell eingeben:</p>
-						<code>{grouped(setup.secret)}</code>
-					</details>
-				{/if}
-			{/if}
-			<form onsubmit={submitCode}>
-				<label>
-					<span>Code</span>
-					<input
-						class="code"
-						inputmode="numeric"
-						autocomplete="one-time-code"
-						pattern={'[0-9 ]{6,7}'}
-						maxlength="7"
-						required
-						bind:value={code}
-						disabled={busy}
-					/>
-				</label>
-				{#if message}<p class="msg" role="alert">{message}</p>{/if}
-				<button class="primary" type="submit" disabled={busy}>Bestätigen</button>
-				<button class="link" type="button" onclick={reset} disabled={busy}>Zurück</button>
-			</form>
+<AuthCard branding={b}>
+	{#if step === 'credentials'}
+		<h1>Anmelden</h1>
+		{#if done && !message}
+			<p class="notice ok">Dein Passwort ist gesetzt. Melde dich jetzt damit an.</p>
 		{/if}
-	</main>
-
-	{#if b.powered_by}
-		<div class="powered"><Leprechaun />powered by <strong>Heinzel</strong></div>
+		<form onsubmit={submitCredentials}>
+			<label class="field">
+				<span>E-Mail</span>
+				<input
+					class="input"
+					type="email"
+					autocomplete="username"
+					required
+					bind:value={email}
+					disabled={busy}
+				/>
+			</label>
+			<label class="field">
+				<span>Passwort</span>
+				<input
+					class="input"
+					type="password"
+					autocomplete="current-password"
+					required
+					bind:value={password}
+					disabled={busy}
+				/>
+			</label>
+			{#if message}<p class="notice error" role="alert">{message}</p>{/if}
+			<button class="btn btn-primary" type="submit" disabled={busy}>Weiter</button>
+			<a class="forgot" href="/passwort-vergessen">Passwort vergessen?</a>
+		</form>
+	{:else}
+		{#if step === 'totp'}
+			<h1>Bestätigungscode</h1>
+			<p class="lead">Gib den 6-stelligen Code aus deiner Authenticator-App ein.</p>
+		{:else}
+			<h1>Zwei-Faktor einrichten</h1>
+			<p class="lead">
+				Scanne den QR-Code mit einer Authenticator-App (z. B. Microsoft Authenticator) und gib
+				danach den angezeigten Code ein.
+			</p>
+			{#if setup}
+				<img class="qr" src={setup.qr_svg} alt="QR-Code für die Authenticator-App" />
+				<details>
+					<summary>Code kann nicht gescannt werden?</summary>
+					<p>Schlüssel manuell eingeben:</p>
+					<code>{grouped(setup.secret)}</code>
+				</details>
+			{/if}
+		{/if}
+		<form onsubmit={submitCode}>
+			<label class="field">
+				<span>Code</span>
+				<input
+					class="input code"
+					inputmode="numeric"
+					autocomplete="one-time-code"
+					pattern={'[0-9 ]{6,7}'}
+					maxlength="7"
+					required
+					bind:value={code}
+					disabled={busy}
+				/>
+			</label>
+			{#if message}<p class="notice error" role="alert">{message}</p>{/if}
+			<button class="btn btn-primary" type="submit" disabled={busy}>Bestätigen</button>
+			<button class="btn btn-link" type="button" onclick={reset} disabled={busy}>Zurück</button>
+		</form>
 	{/if}
-</div>
+</AuthCard>
 
 <style>
-	.wrap {
-		min-height: 100vh;
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		justify-content: center;
-		gap: 20px;
-		padding: 24px;
-		box-sizing: border-box;
-		background: var(--bg);
-	}
-	.card {
-		width: 100%;
-		max-width: 400px;
-		box-sizing: border-box;
-		padding: 32px;
-		background: var(--surface);
-		border: 1px solid var(--line);
-		border-radius: 18px;
-		display: flex;
-		flex-direction: column;
-		gap: 14px;
-	}
-	.logo {
-		height: 48px;
-		width: auto;
-		align-self: flex-start;
-		margin-bottom: 8px;
-	}
-	h1 {
-		margin: 0;
-		font-size: 24px;
-		letter-spacing: -0.01em;
-	}
-	.lead {
-		margin: 0;
-		color: var(--muted);
-		font-size: 15px;
-	}
-	form {
-		display: flex;
-		flex-direction: column;
-		gap: 14px;
-	}
-	label {
-		display: flex;
-		flex-direction: column;
-		gap: 6px;
-		font-size: 14px;
-		font-weight: 600;
-		color: var(--ink-2);
-	}
-	input {
-		min-height: 44px;
-		padding: 0 12px;
-		border: 1px solid var(--input);
-		border-radius: 10px;
-		background: var(--surface);
-		color: var(--ink);
-		font: inherit;
-		font-size: 16px;
-	}
-	input:focus-visible {
-		outline: 2px solid var(--primary);
-		outline-offset: 1px;
-	}
 	.code {
 		font-size: 22px;
 		letter-spacing: 0.3em;
 		font-variant-numeric: tabular-nums;
+	}
+	.forgot {
+		align-self: center;
+		font-size: 14px;
 	}
 	.qr {
 		width: 200px;
@@ -249,50 +193,5 @@
 		font-size: 15px;
 		letter-spacing: 0.08em;
 		word-break: break-all;
-	}
-	.msg {
-		margin: 0;
-		padding: 10px 12px;
-		border-radius: 10px;
-		background: var(--danger-bg);
-		color: var(--danger-ink);
-		font-size: 14px;
-	}
-	.primary {
-		min-height: 46px;
-		border: 0;
-		border-radius: 10px;
-		background: var(--primary);
-		color: #fff;
-		font: inherit;
-		font-size: 15px;
-		font-weight: 600;
-		cursor: pointer;
-	}
-	.primary:hover {
-		background: var(--primary-hover);
-	}
-	.primary:disabled {
-		opacity: 0.6;
-		cursor: default;
-	}
-	.link {
-		min-height: 40px;
-		border: 0;
-		background: transparent;
-		color: var(--link);
-		font: inherit;
-		font-size: 14px;
-		cursor: pointer;
-	}
-	.powered {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		font-size: 12px;
-		color: var(--muted-2);
-	}
-	.powered strong {
-		color: var(--ink-2);
 	}
 </style>

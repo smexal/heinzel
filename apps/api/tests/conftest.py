@@ -113,7 +113,11 @@ def seeded(migrated):
 @pytest.fixture
 def api(seeded):
     """App on the test database, talking to it as tenant schmelzi (host localhost)."""
-    with TestClient(create_app(seeded), base_url="http://localhost") as c:
+    from heinzel_api.mail import MemoryMailer
+    from heinzel_api.ratelimit import MemoryRateLimiter
+
+    app = create_app(seeded, mailer=MemoryMailer(), ratelimiter=MemoryRateLimiter())
+    with TestClient(app, base_url="http://localhost") as c:
         yield c
 
 
