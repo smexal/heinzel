@@ -15,6 +15,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     MetaData,
     String,
     Text,
@@ -22,7 +23,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import INET, JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, INET, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 SCHEMA = "core"
@@ -69,7 +70,45 @@ class Tenant(Base):
     slug: Mapped[str] = mapped_column(String(41), unique=True, nullable=False)
     display_name: Mapped[str] = mapped_column(String(200), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="active")
+    # Host names that resolve to this tenant (managed by the platform operator)
+    domains: Mapped[list[str]] = mapped_column(
+        ARRAY(String(253)), nullable=False, server_default="{}"
+    )
     created_at: Mapped[datetime] = _created()
+
+
+class TenantSettings(Base):
+    """The tenant's configuration (tenant.json shape without slug and domains)."""
+
+    __tablename__ = "tenant_settings"
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenant.id", ondelete="CASCADE"), primary_key=True
+    )
+    config: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    # Optimistic locking: a save must name the version it started from.
+    version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+
+
+class TenantAsset(Base):
+    """Logos and other branding files, served at /api/v1/tenants/<slug>/assets/<name>."""
+
+    __tablename__ = "tenant_asset"
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenant.id", ondelete="CASCADE"), primary_key=True
+    )
+    name: Mapped[str] = mapped_column(String(100), primary_key=True)
+    content_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
 
 class User(Base):
@@ -227,4 +266,6 @@ TENANT_TABLES = [
     "audit_event",
     "action_token",
     "permission_seeded",
+    "tenant_settings",
+    "tenant_asset",
 ]

@@ -79,6 +79,16 @@
 		}
 		if (e.action === 'auth.login_failed') return String(e.data.email ?? '');
 		if (e.action === 'audit.exported') return `${e.data.rows ?? 0} Einträge · CSV`;
+		if (e.target_type === 'settings') {
+			const names: Record<string, string> = {
+				general: 'Allgemein',
+				branding: 'Branding',
+				localization: 'Sprache & Region',
+				identity: 'Anmeldung',
+				email: 'E-Mail'
+			};
+			return names[e.target_id ?? ''] ?? e.target_id ?? '';
+		}
 		if (e.target_type === 'role') {
 			const n = e.data.name;
 			return `Rolle ${Array.isArray(n) ? n[n.length - 1] : (n ?? e.target_id ?? '')}`;

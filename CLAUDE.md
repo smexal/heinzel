@@ -39,7 +39,7 @@ not in the concept; propose them instead.
 apps/api        FastAPI core (Python 3.13, uv)
 apps/web        SvelteKit 3 + Svelte 5 runes + Tailwind 4 (pnpm workspace)
 modules/<id>    module manifest, settings schema, later api/ code
-tenants/<slug>  tenant config and assets (dev seed; later stored in the database)
+tenants/<slug>  seed for a new tenant: tenant.json and assets (then edited in the portal)
 packages/       shared code once needed (ui, sdk)
 docs/           concept snapshots
 deploy/         Caddyfile for the local full stack (production proxy config follows)
@@ -73,6 +73,10 @@ pnpm check:web && pnpm build:web
 
 ## Decisions taken during implementation
 
+- Tenant configuration lives in the database. `heinzel seed-tenants` creates settings and assets only for new
+  tenants; `--reset-config` overwrites them from `tenants/<slug>/` (discards portal changes). Domains are
+  operator-managed (seed), not editable by tenant admins.
+- Uploaded logos get content-hashed names (cache busting) and are served with a sandbox CSP.
 - Sessions live in Postgres (`core.session`, token hash only), not Valkey: one store, RLS, simple
   revocation. Revisit if load demands it.
 - Mail is sent synchronously after commit (`heinzel_api.mail`); failures are reported (`mail_sent: false`) and
@@ -114,6 +118,12 @@ Done:
       (`require_step_up`, `POST /auth/step-up`, 10 min) for role definitions and role assignments; web: `withStepUp()`
 - [x] Manifest default permissions are applied once per tenant (`core.permission_seeded`), so seeding never undoes an admin's change
 
+- [x] Tenant settings in the database (`core.tenant_settings`, `core.tenant_asset`, `core.tenant.domains`), runtime
+      `TenantRegistry` (30 s cache, invalidated on save); `tenants/<slug>/` is only the seed
+- [x] Einstellungen: Allgemein, Branding (logos upload, colours, theme, powered by), Sprache & Region (defaults + locks),
+      Anmeldung and E-Mail (step-up; SMTP password encrypted, test mail); optimistic versioning
+
 Next, in this order:
-- [ ] Admin console, rest: Module, Einstellungen (Branding, Sprache & Region, Navigation, Anmeldung, E-Mail)
+- [ ] Admin console, rest: Module (enable, area, sub-navigation, module settings from settings.schema.json) and
+      Navigation (areas) in Einstellungen
 - [ ] Then Phase 2 engines (inbox, search, files), then the first module: Aufgaben

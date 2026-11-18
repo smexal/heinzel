@@ -15,9 +15,13 @@
 		{/if}
 		{@render children()}
 	</main>
-	{#if branding.powered_by}
-		<div class="powered"><Leprechaun />powered by <strong>Heinzel</strong></div>
-	{/if}
+	<footer class="foot">
+		{#if branding.imprint_url}<a href={branding.imprint_url} rel="noopener">Impressum</a>{/if}
+		{#if branding.privacy_url}<a href={branding.privacy_url} rel="noopener">Datenschutz</a>{/if}
+		{#if branding.powered_by}
+			<span class="powered"><Leprechaun />powered by <strong>Heinzel</strong></span>
+		{/if}
+	</footer>
 </div>
 
 <style>
@@ -62,6 +66,17 @@
 		display: flex;
 		flex-direction: column;
 		gap: 14px;
+	}
+	.foot {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		justify-content: center;
+		gap: 8px 18px;
+		font-size: 13px;
+	}
+	.foot a {
+		color: var(--muted);
 	}
 	.powered {
 		display: flex;

@@ -7,15 +7,13 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request
-from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from heinzel_api import identity, rbac
-from heinzel_api.db import global_session, tenant_session
+from heinzel_api.db import tenant_session
 from heinzel_api.manifests import Manifest
-from heinzel_api.models import Tenant
 from heinzel_api.ratelimit import Limit
-from heinzel_api.tenants import TenantConfig, resolve_tenant
+from heinzel_api.tenants import TenantConfig
 
 SESSION_COOKIE = "heinzel_session"
 
@@ -89,26 +87,17 @@ def manifests(request: Request) -> dict[str, Manifest]:
     return request.app.state.manifests
 
 
-def tenant_config(request: Request) -> TenantConfig:
-    config = resolve_tenant(request.app.state.tenants, request_host(request))
-    if config is None:
+def current_tenant(request: Request) -> TenantContext:
+    """The tenant of the request host (core.tenant.domains). Unknown or not yet seeded
+    tenants answer 404."""
+    entry = request.app.state.registry.resolve(request_host(request))
+    if entry is None:
         raise HTTPException(status_code=404, detail="unknown_tenant")
-    return config
+    return TenantContext(entry.id, entry.config)
 
 
-def current_tenant(
-    request: Request, config: Annotated[TenantConfig, Depends(tenant_config)]
-) -> TenantContext:
-    cache: dict[str, UUID] = request.app.state.tenant_ids
-    tenant_id = cache.get(config.slug)
-    if tenant_id is None:
-        with global_session(db_factory(request)) as s:
-            tenant_id = s.scalar(select(Tenant.id).where(Tenant.slug == config.slug))
-        if tenant_id is None:
-            # tenant.json exists, but `heinzel seed-tenants` has not been run
-            raise HTTPException(status_code=503, detail="tenant_not_provisioned")
-        cache[config.slug] = tenant_id
-    return TenantContext(tenant_id, config)
+def tenant_config(tenant: Annotated[TenantContext, Depends(current_tenant)]) -> TenantConfig:
+    return tenant.config
 
 
 def optional_principal(

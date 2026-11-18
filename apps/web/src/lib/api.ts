@@ -23,10 +23,15 @@ export function put<T>(path: string, body?: unknown): Promise<T> {
 }
 
 export async function send<T>(method: string, path: string, body?: unknown): Promise<T> {
+	// Files and blobs go as they are (e.g. logo uploads), everything else as JSON.
+	const raw = body instanceof Blob;
 	const res = await fetch(`/api/v1${path}`, {
 		method,
-		headers: body === undefined ? {} : { 'content-type': 'application/json' },
-		body: body === undefined ? undefined : JSON.stringify(body),
+		headers:
+			body === undefined
+				? {}
+				: { 'content-type': raw ? body.type || 'application/octet-stream' : 'application/json' },
+		body: body === undefined ? undefined : raw ? body : JSON.stringify(body),
 		credentials: 'same-origin'
 	});
 	if (!res.ok) {

@@ -40,6 +40,10 @@ docker compose exec api heinzel create-admin --tenant schmelzi --email you@schme
 
 Mail sent in dev (invitations, password reset) is caught by Mailpit: http://localhost:8025
 
+**Tenant settings** live in the database. `tenants/<slug>/tenant.json` and its `assets/` only seed a
+new tenant; afterwards admins change them under Administration › Einstellungen. To start over from
+the files: `cd apps/api && uv run heinzel seed-tenants --reset-config`.
+
 ## Checks
 
 ```bash

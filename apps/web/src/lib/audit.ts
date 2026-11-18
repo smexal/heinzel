@@ -25,6 +25,11 @@ export const ACTION_LABELS: Record<string, string> = {
 	'role.created': 'Rolle angelegt',
 	'role.updated': 'Rolle geändert',
 	'role.deleted': 'Rolle gelöscht',
+	'settings.changed': 'Einstellungen geändert',
+	'settings.logo_changed': 'Logo geändert',
+	'settings.logo_removed': 'Logo entfernt',
+	'settings.test_mail': 'Test-E-Mail gesendet',
+	'settings.reset_from_seed': 'Einstellungen aus Vorlage zurückgesetzt',
 	'tenant.registered': 'Mandant eingerichtet',
 	'audit.exported': 'Audit-Log exportiert'
 };

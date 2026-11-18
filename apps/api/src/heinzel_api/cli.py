@@ -8,6 +8,7 @@ verify-audit                check the audit hash chain of a tenant
 
 import argparse
 import getpass
+import hashlib
 import sys
 from pathlib import Path
 
@@ -19,7 +20,7 @@ from heinzel_api import audit, identity, rbac
 from heinzel_api.config import Settings, get_settings
 from heinzel_api.db import make_sessionmaker, tenant_session
 from heinzel_api.manifests import load_manifests
-from heinzel_api.models import Tenant
+from heinzel_api.models import Tenant, TenantAsset, TenantSettings
 from heinzel_api.tenants import TenantConfig, load_tenants
 
 API_DIR = Path(__file__).resolve().parents[2]
@@ -34,8 +35,18 @@ def run_migrations(url: str, revision: str = "head", down: bool = False) -> None
         command.upgrade(cfg, revision)
 
 
-def seed_tenants(settings: Settings) -> list[str]:
-    """Upsert tenant rows and system roles. Safe to run repeatedly."""
+ASSET_TYPES = {".svg": "image/svg+xml", ".png": "image/png", ".webp": "image/webp"}
+
+
+def _seed_config(config: TenantConfig) -> dict:
+    """tenant.json without the operator-owned fields (slug, domains)."""
+    return config.model_dump(mode="json", exclude={"slug", "domains"})
+
+
+def seed_tenants(settings: Settings, reset_config: bool = False) -> list[str]:
+    """Register tenants/<slug> folders: tenant row (slug, name, domains), settings and assets
+    for new tenants, system roles. Existing settings stay untouched unless reset_config:
+    after the first seed the portal's Einstellungen are the source of truth."""
     tenants = load_tenants(settings.tenants_dir)
     manifests = load_manifests(settings.modules_dir)
     factory = make_sessionmaker(settings.migration_database_url)
@@ -43,19 +54,40 @@ def seed_tenants(settings: Settings) -> list[str]:
     for config in tenants.values():
         with factory() as s, s.begin():
             row = s.scalar(select(Tenant).where(Tenant.slug == config.slug))
+            created = row is None
             if row is None:
                 row = Tenant(slug=config.slug, display_name=config.display_name)
                 s.add(row)
-                s.flush()
-                created = True
-            else:
-                row.display_name = config.display_name
-                created = False
+            row.domains = [d.lower() for d in config.domains]
+            s.flush()
             tenant_id = row.id
         with tenant_session(factory, tenant_id) as s:
+            current = s.get(TenantSettings, tenant_id)
+            if current is None:
+                s.add(TenantSettings(tenant_id=tenant_id, config=_seed_config(config)))
+            elif reset_config:
+                current.config = _seed_config(config)
+                current.version += 1
+            assets_dir = settings.tenants_dir / config.slug / "assets"
+            for path in sorted(assets_dir.glob("*")) if assets_dir.is_dir() else []:
+                ctype = ASSET_TYPES.get(path.suffix.lower())
+                if ctype is None:
+                    continue
+                existing = s.get(TenantAsset, {"tenant_id": tenant_id, "name": path.name})
+                if existing is not None and not reset_config:
+                    continue
+                data = path.read_bytes()
+                if existing is None:
+                    existing = TenantAsset(tenant_id=tenant_id, name=path.name)
+                    s.add(existing)
+                existing.content_type = ctype
+                existing.data = data
+                existing.sha256 = hashlib.sha256(data).hexdigest()
             rbac.ensure_system_roles(s, tenant_id, manifests)
             if created:
                 audit.record(s, tenant_id, "tenant.registered", channel="cli")
+            elif reset_config and current is not None:
+                audit.record(s, tenant_id, "settings.reset_from_seed", channel="cli")
         done.append(config.slug)
     return done
 
@@ -63,16 +95,22 @@ def seed_tenants(settings: Settings) -> list[str]:
 def create_admin(
     settings: Settings, slug: str, email: str, display_name: str, password: str
 ) -> None:
-    tenants = load_tenants(settings.tenants_dir)
-    config: TenantConfig | None = tenants.get(slug)
-    if config is None:
-        raise SystemExit(f"Unbekannter Mandant '{slug}'")
     manifests = load_manifests(settings.modules_dir)
     factory = make_sessionmaker(settings.migration_database_url)
     with factory() as s:
-        tenant_id = s.scalar(select(Tenant.id).where(Tenant.slug == slug))
-    if tenant_id is None:
+        row = s.execute(select(Tenant.id, Tenant.domains).where(Tenant.slug == slug)).first()
+    if row is None:
         raise SystemExit(f"Mandant '{slug}' ist nicht registriert. Zuerst: heinzel seed-tenants")
+    tenant_id = row.id
+    with tenant_session(factory, tenant_id) as s:
+        stored = s.get(TenantSettings, tenant_id)
+        if stored is None:
+            raise SystemExit(
+                f"Mandant '{slug}' hat keine Einstellungen. Zuerst: heinzel seed-tenants"
+            )
+        config = TenantConfig.model_validate(
+            {**stored.config, "slug": slug, "domains": list(row.domains)}
+        )
     policy = config.identity.local
     with tenant_session(factory, tenant_id) as s:
         if identity.find_user(s, email):
@@ -97,7 +135,12 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
     m = sub.add_parser("migrate", help="apply database migrations")
     m.add_argument("revision", nargs="?", default="head")
-    sub.add_parser("seed-tenants", help="register tenants and create system roles")
+    sd = sub.add_parser("seed-tenants", help="register tenants and create system roles")
+    sd.add_argument(
+        "--reset-config",
+        action="store_true",
+        help="overwrite settings and assets with tenants/<slug> (discards portal changes)",
+    )
     a = sub.add_parser("create-admin", help="create an administrator")
     a.add_argument("--tenant", required=True)
     a.add_argument("--email", required=True)
@@ -110,7 +153,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "migrate":
         run_migrations(settings.migration_database_url, args.revision)
     elif args.cmd == "seed-tenants":
-        for slug in seed_tenants(settings):
+        for slug in seed_tenants(settings, reset_config=args.reset_config):
             print(f"✓ {slug}")
     elif args.cmd == "create-admin":
         password = getpass.getpass("Passwort: ")

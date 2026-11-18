@@ -45,6 +45,8 @@ export type Shell = {
 		accent: string;
 		theme_default: 'light' | 'dark' | 'system';
 		powered_by: boolean;
+		imprint_url: string | null;
+		privacy_url: string | null;
 	};
 	navigation: NavSection[];
 	quick_actions: QuickAction[];

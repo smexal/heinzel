@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from email.message import EmailMessage
 from email.utils import formataddr, make_msgid
 
+from heinzel_api import crypto
 from heinzel_api.tenants import TenantConfig
 
 log = logging.getLogger(__name__)
@@ -40,8 +41,15 @@ def _password(ref: str | None) -> str | None:
 
 
 class SmtpMailer(Mailer):
-    def __init__(self, host_override: str | None = None):
+    def __init__(self, host_override: str | None = None, secret_key: str | None = None):
         self._host_override = host_override
+        self._secret_key = secret_key
+
+    def _password(self, smtp: dict) -> str | None:
+        """Set in the portal (encrypted) or referenced from the environment."""
+        if smtp.get("password_enc") and self._secret_key:
+            return crypto.decrypt(self._secret_key, "smtp", smtp["password_enc"])
+        return _password(smtp.get("password_ref"))
 
     def send(self, tenant: TenantConfig, mail: Mail) -> bool:
         cfg = (tenant.model_extra or {}).get("email") or {}
@@ -68,7 +76,7 @@ class SmtpMailer(Mailer):
                 if security == "starttls":
                     client.starttls(context=ssl.create_default_context())
                 if smtp.get("username"):
-                    client.login(smtp["username"], _password(smtp.get("password_ref")) or "")
+                    client.login(smtp["username"], self._password(smtp) or "")
                 client.send_message(msg)
             return True
         except (OSError, smtplib.SMTPException) as e:

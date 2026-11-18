@@ -10,8 +10,17 @@ from heinzel_api.db import make_sessionmaker
 from heinzel_api.mail import Mailer, SmtpMailer
 from heinzel_api.manifests import load_manifests
 from heinzel_api.ratelimit import RateLimiter, ValkeyRateLimiter
-from heinzel_api.routes import account, admin_audit, admin_users, auth, health, me, shell
-from heinzel_api.tenants import load_tenants
+from heinzel_api.routes import (
+    account,
+    admin_audit,
+    admin_settings,
+    admin_users,
+    auth,
+    health,
+    me,
+    shell,
+)
+from heinzel_api.tenants import TenantRegistry
 
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
@@ -28,11 +37,10 @@ def create_app(
     async def lifespan(app: FastAPI):
         app.state.settings = settings
         app.state.manifests = load_manifests(settings.modules_dir)
-        app.state.tenants = load_tenants(settings.tenants_dir)
-        app.state.tenant_ids = {}
         app.state.audit_chain = {}
         app.state.db = make_sessionmaker(settings.database_url)
-        app.state.mailer = mailer or SmtpMailer(settings.smtp_host_override)
+        app.state.registry = TenantRegistry(app.state.db)
+        app.state.mailer = mailer or SmtpMailer(settings.smtp_host_override, settings.secret_key)
         app.state.ratelimiter = ratelimiter or ValkeyRateLimiter(settings.valkey_url)
         yield
 
@@ -56,6 +64,7 @@ def create_app(
     app.include_router(account.router)
     app.include_router(admin_users.router)
     app.include_router(admin_audit.router)
+    app.include_router(admin_settings.router)
     return app
 
 

@@ -8,12 +8,14 @@ import re
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 from heinzel_api import localization
+from heinzel_api.db import tenant_session
 from heinzel_api.deps import OptionalPrincipalDep, tenant_config
 from heinzel_api.manifests import Manifest
+from heinzel_api.models import TenantAsset
 from heinzel_api.tenants import TenantConfig
 
 router = APIRouter(prefix="/api/v1")
@@ -53,6 +55,8 @@ class ShellBranding(BaseModel):
     accent: str
     theme_default: str
     powered_by: bool
+    imprint_url: str | None = None
+    privacy_url: str | None = None
 
 
 class ShellUser(BaseModel):
@@ -179,6 +183,7 @@ def build_shell(
 
 def _branding(tenant: TenantConfig) -> ShellBranding:
     b = tenant.branding
+    legal = (tenant.model_extra or {}).get("legal") or {}
     return ShellBranding(
         display_name=tenant.display_name,
         short_name=tenant.short_name,
@@ -189,6 +194,8 @@ def _branding(tenant: TenantConfig) -> ShellBranding:
         accent=b.colors.get("accent", b.colors["primary"]),
         theme_default=b.theme_default,
         powered_by=b.powered_by,
+        imprint_url=legal.get("imprint_url"),
+        privacy_url=legal.get("privacy_url"),
     )
 
 
@@ -211,12 +218,26 @@ def get_shell(
 
 
 @router.get("/tenants/{slug}/assets/{name}")
-def get_tenant_asset(slug: str, name: str, request: Request) -> FileResponse:
-    tenant = request.app.state.tenants.get(slug)
-    if tenant is None or not ASSET_NAME.match(name):
+def get_tenant_asset(slug: str, name: str, request: Request) -> Response:
+    """Public: the login page shows the logo. Served with a sandbox CSP, so an uploaded SVG
+    can never run script on the portal's origin."""
+    entry = request.app.state.registry.by_slug(slug)
+    if entry is None or not ASSET_NAME.match(name):
         raise HTTPException(status_code=404)
-    base = (request.app.state.settings.tenants_dir / slug / "assets").resolve()
-    path = (base / name).resolve()
-    if path.parent != base or not path.is_file():
-        raise HTTPException(status_code=404)
-    return FileResponse(path)
+    with tenant_session(request.app.state.db, entry.id) as s:
+        asset = s.get(TenantAsset, {"tenant_id": entry.id, "name": name})
+        if asset is None:
+            raise HTTPException(status_code=404)
+        data, ctype, etag = asset.data, asset.content_type, asset.sha256[:16]
+    if request.headers.get("if-none-match") == f'"{etag}"':
+        return Response(status_code=304)
+    return Response(
+        content=data,
+        media_type=ctype,
+        headers={
+            "ETag": f'"{etag}"',
+            "Cache-Control": "public, max-age=300",
+            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )

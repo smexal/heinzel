@@ -7,10 +7,11 @@
 	let { data, children }: LayoutProps = $props();
 	const b = $derived(data.shell.branding);
 
-	// Only plain hex colours from the tenant config reach the stylesheet.
+	// Only plain hex colours from the tenant config reach the stylesheet. `:root:root` outranks
+	// the defaults in layout.css regardless of stylesheet order.
 	const hex = (v: string, fallback: string) => (/^#[0-9a-fA-F]{6}$/.test(v) ? v : fallback);
 	const brandCss = $derived(
-		`<style>:root{--primary:${hex(b.primary, '#3b7084')};--accent:${hex(b.accent, '#bdcf1f')}}</style>`
+		`<style>:root:root{--primary:${hex(b.primary, '#3b7084')};--accent:${hex(b.accent, '#bdcf1f')}}</style>`
 	);
 
 	onMount(() => initTheme(b.theme_default));

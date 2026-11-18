@@ -41,17 +41,23 @@ def test_admin_items_follow_permissions():
     assert [i.key for i in admin.items] == ["audit"]
 
 
-def test_unknown_tenant(client):
-    r = client.get("/api/v1/shell", headers={"host": "example.org"})
+def test_unknown_tenant(api):
+    r = api.get("/api/v1/shell", headers={"host": "example.org"})
     assert r.status_code == 404
 
 
-def test_tenant_asset(client):
-    r = client.get("/api/v1/tenants/schmelzi/assets/logo-schmelzi.svg")
+def test_tenant_asset_from_database(api):
+    r = api.get("/api/v1/tenants/schmelzi/assets/logo-schmelzi.svg")
     assert r.status_code == 200
     assert "svg" in r.headers["content-type"]
+    assert "sandbox" in r.headers["content-security-policy"]
+    again = api.get(
+        "/api/v1/tenants/schmelzi/assets/logo-schmelzi.svg",
+        headers={"if-none-match": r.headers["etag"]},
+    )
+    assert again.status_code == 304
 
 
-def test_tenant_asset_rejects_traversal(client):
-    r = client.get("/api/v1/tenants/schmelzi/assets/..%2Ftenant.json")
+def test_tenant_asset_rejects_traversal(api):
+    r = api.get("/api/v1/tenants/schmelzi/assets/..%2Ftenant.json")
     assert r.status_code == 404

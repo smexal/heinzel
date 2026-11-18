@@ -1,9 +1,15 @@
 """Tenant configuration (tenants/<slug>/tenant.json) and resolution by host name."""
 
 import json
+import threading
+import time
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import select
+
+from heinzel_api.db import global_session, tenant_session
+from heinzel_api.models import Tenant, TenantSettings
 
 LocalizedText = dict[str, str]
 
@@ -87,12 +93,76 @@ def load_tenants(tenants_dir: Path) -> dict[str, TenantConfig]:
     return tenants
 
 
-def resolve_tenant(tenants: dict[str, TenantConfig], host: str | None) -> TenantConfig | None:
-    """Resolve a tenant from the request host (port is ignored)."""
-    if not host:
-        return None
-    hostname = host.split(":")[0].lower()
-    for tenant in tenants.values():
-        if hostname in tenant.domains:
-            return tenant
-    return None
+# --- Runtime registry (database) ----------------------------------------------------------
+
+
+class TenantEntry:
+    __slots__ = ("id", "config", "version")
+
+    def __init__(self, id, config: TenantConfig, version: int):  # noqa: A002
+        self.id = id
+        self.config = config
+        self.version = version
+
+
+class TenantRegistry:
+    """Active tenants with their settings, loaded from the database and cached briefly.
+
+    Host resolution needs every tenant's domains before a tenant is known, so the registry
+    reads the global tenant table, then each tenant's settings inside its own RLS scope.
+    A settings change calls invalidate(); other API processes pick it up within `ttl`.
+    """
+
+    def __init__(self, factory, ttl: float = 30.0):
+        self._factory = factory
+        self._ttl = ttl
+        self._lock = threading.Lock()
+        self._loaded_at = 0.0
+        self._by_slug: dict[str, TenantEntry] = {}
+        self._by_domain: dict[str, TenantEntry] = {}
+
+    def invalidate(self) -> None:
+        with self._lock:
+            self._loaded_at = 0.0
+
+    def _ensure(self) -> None:
+        if time.monotonic() - self._loaded_at < self._ttl:
+            return
+        with self._lock:
+            if time.monotonic() - self._loaded_at < self._ttl:
+                return
+            self._load()
+            self._loaded_at = time.monotonic()
+
+    def _load(self) -> None:
+        with global_session(self._factory) as s:
+            rows = list(
+                s.execute(
+                    select(Tenant.id, Tenant.slug, Tenant.domains).where(Tenant.status == "active")
+                )
+            )
+        by_slug: dict[str, TenantEntry] = {}
+        by_domain: dict[str, TenantEntry] = {}
+        for tid, slug, domains in rows:
+            with tenant_session(self._factory, tid) as s:
+                settings = s.get(TenantSettings, tid)
+            if settings is None:
+                continue  # registered but not seeded yet
+            config = TenantConfig.model_validate(
+                {**settings.config, "slug": slug, "domains": list(domains)}
+            )
+            entry = TenantEntry(tid, config, settings.version)
+            by_slug[slug] = entry
+            for d in domains:
+                by_domain[d.lower()] = entry
+        self._by_slug, self._by_domain = by_slug, by_domain
+
+    def resolve(self, host: str | None) -> TenantEntry | None:
+        if not host:
+            return None
+        self._ensure()
+        return self._by_domain.get(host.split(":")[0].lower())
+
+    def by_slug(self, slug: str) -> TenantEntry | None:
+        self._ensure()
+        return self._by_slug.get(slug)

@@ -5,7 +5,8 @@ FastAPI core: tenants, identity, permissions, audit, module host, MCP gateway (l
 ```bash
 uv sync
 uv run heinzel migrate                 # schema core, role heinzel_app, RLS policies
-uv run heinzel seed-tenants            # register tenants/<slug> and their system roles
+uv run heinzel seed-tenants            # register tenants/<slug> (settings only for new tenants)
+uv run heinzel seed-tenants --reset-config   # overwrite settings and logos from tenants/<slug>
 uv run heinzel create-admin --tenant schmelzi --email you@example.org --name "Vorname Name"
 uv run uvicorn heinzel_api.main:app --reload --port 8000
 uv run pytest                          # needs Postgres (docker compose); creates heinzel_test
@@ -48,4 +49,9 @@ policies show and accept only that tenant's rows. Migrations of new tenant table
 | `GET /api/v1/admin/audit/export.csv` | same filters as CSV (`;`, UTF-8 with BOM); the export is audited |
 | `POST /api/v1/auth/step-up` | re-confirm with TOTP (or password without 2FA) for 10 minutes |
 | `POST /api/v1/admin/roles`, `PUT/DELETE …/{key}` | custom roles (`core.roles.manage`, step-up) |
+| `GET /api/v1/admin/settings` | all sections, version, options (`core.settings.manage`) |
+| `PUT /api/v1/admin/settings/{general\|branding\|localization}` | save a section `{version, values}`; 409 on a stale version |
+| `PUT /api/v1/admin/settings/secure/{identity\|email}` | same, with step-up |
+| `PUT/DELETE /api/v1/admin/settings/branding/logos/{light\|dark\|mark}` | logo upload (raw body: SVG, PNG, WebP, ≤ 512 KB) |
+| `POST /api/v1/admin/settings/email/test` | test mail to the signed-in admin |
 | `GET /api/v1/admin/roles` | roles with expanded permissions and the permission catalogue |
