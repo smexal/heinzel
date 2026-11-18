@@ -161,6 +161,8 @@ Phase 1 (core platform and admin console) is complete.
 - [x] Aufgaben (first module): personal and shared lists with members, quick add, due tags, assignment via
       Mein Eingang (action "Erledigt", notice to the creator), pictures, search, widget "Heute fällig",
       reminders (inbox or inbox + e-mail), retention, hand-back on deactivation; Übersicht redesigned
+- [x] Aufgaben: checklists (tick, rename, reorder by drag or Alt+↑/↓, progress in the line and inbox) and
+      attachments of all common formats (files service: pictures, PDF, OOXML, ODF, TXT/CSV; no macros, no archives)
 
 Next, in this order:
 - [ ] MCP gateway (tools from manifests, respects permissions and `mcp_disabled`)

@@ -64,7 +64,7 @@ policies show and accept only that tenant's rows. Migrations of new tenant table
 | `GET /api/v1/admin/modules` | modules with status, area, children, permissions + roles, settings schema/values, MCP items |
 | `PUT /api/v1/admin/modules/{key}` | activate/deactivate, area, hidden children, settings (JSON Schema), `mcp_disabled` |
 | `PUT /api/v1/admin/settings/navigation` | areas in order (`key` null = new), `hide_empty_areas` |
-| `POST /api/v1/files?module=<id>` | upload (raw body, `X-Filename`); type sniffed, size limit, virus scan; staged until linked |
+| `POST /api/v1/files?module=<id>` | upload (raw body, `X-Filename`); type sniffed (pictures, PDF, docx/xlsx/pptx, odt/ods/odp, TXT/CSV; no macros, archives or programs), size limit, virus scan; staged until linked |
 | `GET /api/v1/files/{id}` | download if allowed (uploader, inbox recipient, or the module's access check) |
 | `GET /api/v1/inbox?view=open\|notices\|done&source=` | Mein Eingang with counts and sources |
 | `POST /api/v1/inbox/{id}/read\|unread\|done\|reopen`, `/read-all` | item state |

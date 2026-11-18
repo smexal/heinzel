@@ -169,7 +169,7 @@ def test_sharing_needs_permission_and_setting(api, make_user, app_factory):
         entry.config.modules[0].settings = original
 
 
-def test_pictures_follow_task_visibility(api, make_user):
+def test_attachments_follow_task_visibility(api, make_user):
     a, b = _client(api, make_user), _client(api, make_user)
     t = _new(a, "Rampe vereist")
     up = a.post(
@@ -177,9 +177,9 @@ def test_pictures_follow_task_visibility(api, make_user):
         content=JPEG,
         headers={"x-filename": "rampe.jpg", "content-type": "application/octet-stream"},
     ).json()
-    d = a.post(f"{A}/tasks/{t['id']}/images", json={"attachment_ids": [up["id"]]}).json()
-    assert [x["id"] for x in d["attachments"]] == [up["id"]] and d["images"] == 1
-    assert a.get(f"{A}/tasks").json()["tasks"][0]["images"] == 1
+    d = a.post(f"{A}/tasks/{t['id']}/attachments", json={"attachment_ids": [up["id"]]}).json()
+    assert [x["id"] for x in d["attachments"]] == [up["id"]] and d["attachments_count"] == 1
+    assert a.get(f"{A}/tasks").json()["tasks"][0]["attachments_count"] == 1
     assert b.get(up["url"]).status_code == 404  # not a member
 
     lst = a.post(f"{A}/lists", json={"name": "Unterhalt"}).json()
@@ -187,7 +187,7 @@ def test_pictures_follow_task_visibility(api, make_user):
     a.patch(f"{A}/tasks/{t['id']}", json={"list_id": lst["id"]})
     assert b.get(up["url"]).status_code == 200  # now a member of the task's list
 
-    d = a.delete(f"{A}/tasks/{t['id']}/images/{up['id']}").json()
+    d = a.delete(f"{A}/tasks/{t['id']}/attachments/{up['id']}").json()
     assert d["attachments"] == [] and a.get(up["url"]).status_code == 404
 
     pdf = a.post(
@@ -195,8 +195,9 @@ def test_pictures_follow_task_visibility(api, make_user):
         content=b"%PDF-1.7\n" + b"x" * 50,
         headers={"x-filename": "a.pdf", "content-type": "application/octet-stream"},
     ).json()
-    r = a.post(f"{A}/tasks/{t['id']}/images", json={"attachment_ids": [pdf["id"]]})
-    assert r.status_code == 422 and r.json()["detail"] == "images_only"
+    d = a.post(f"{A}/tasks/{t['id']}/attachments", json={"attachment_ids": [pdf["id"]]}).json()
+    assert [x["filename"] for x in d["attachments"]] == ["a.pdf"]
+    assert a.get(pdf["url"]).headers["content-disposition"].startswith("attachment")
 
 
 def test_search_finds_only_visible_tasks(api, make_user):
@@ -309,3 +310,59 @@ def test_tenant_isolation(app_factory, make_tenant):
         s.add(TaskList(tenant_id=a, kind="personal", owner_id=u.id))
     with tenant_session(app_factory, b) as s:
         assert s.scalars(select(TaskList)).all() == []
+
+
+def test_checklist(api, make_user):
+    owner, member = _client(api, make_user), _client(api, make_user)
+    lst = owner.post(f"{A}/lists", json={"name": "Sekretariat"}).json()
+    owner.post(f"{A}/lists/{lst['id']}/members", json={"user_id": member.me["id"]})
+    tag = uuid.uuid4().hex[:8]
+    t = _new(
+        owner,
+        "Protokoll verschicken",
+        list_id=lst["id"],
+        assignee_id=member.me["id"],
+        checklist=["Anhang holen", f"Präsenzliste {tag}"],
+    )
+    assert [c["text"] for c in t["checklist"]] == ["Anhang holen", f"Präsenzliste {tag}"]
+    assert (t["checklist_total"], t["checklist_done"]) == (2, 0)
+    tid = t["id"]
+
+    d = member.post(f"{A}/tasks/{tid}/checklist", json={"text": "  An alle   senden "}).json()
+    first, second, third = (c["id"] for c in d["checklist"])
+    assert d["checklist"][2]["text"] == "An alle senden"
+
+    # tick (idempotent), rename, move to the top, untick
+    d = member.patch(f"{A}/tasks/{tid}/checklist/{first}", json={"done": True}).json()
+    d = member.patch(f"{A}/tasks/{tid}/checklist/{first}", json={"done": True}).json()
+    assert d["checklist"][0]["done"] and d["checklist"][0]["done_by"]["id"] == member.me["id"]
+    assert (d["checklist_total"], d["checklist_done"]) == (3, 1)
+    d = owner.patch(f"{A}/tasks/{tid}/checklist/{third}", json={"position": 0, "text": "Senden"})
+    assert [c["text"] for c in d.json()["checklist"]] == [
+        "Senden",
+        "Anhang holen",
+        f"Präsenzliste {tag}",
+    ]
+    d = owner.delete(f"{A}/tasks/{tid}/checklist/{second}").json()
+    assert [c["id"] for c in d["checklist"]] == [third, first]
+
+    # the list line, the assignee's inbox and the search know about it
+    line = next(x for x in owner.get(f"{A}/tasks").json()["tasks"] if x["id"] == tid)
+    assert (line["checklist_total"], line["checklist_done"]) == (2, 1)
+    item = member.get("/api/v1/inbox").json()["items"][0]
+    assert {"label": "Checkliste", "value": "1 von 2"} in item["facts"]
+    owner.post(f"{A}/tasks/{tid}/checklist", json={"text": f"Archiv {tag}"})
+    assert owner.get(f"/api/v1/search?q=archiv {tag}").json()["total"] == 1
+
+    # outsiders cannot touch it; foreign item ids are not found
+    outsider = _client(api, make_user)
+    r = outsider.patch(f"{A}/tasks/{tid}/checklist/{first}", json={"done": False})
+    assert r.status_code == 404
+    other = _new(owner, "Andere")
+    r = owner.patch(f"{A}/tasks/{other['id']}/checklist/{first}", json={"done": False})
+    assert r.status_code == 404
+    assert owner.post(f"{A}/tasks/{tid}/checklist", json={"text": " "}).status_code == 422
+
+    # completing the task leaves the points as they are
+    done = owner.post(f"{A}/tasks/{tid}/complete").json()
+    assert [c["done"] for c in done["checklist"]] == [False, True, False]

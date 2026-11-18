@@ -110,3 +110,56 @@ def test_local_storage_rejects_escaping_keys(tmp_path):
     assert store.exists("t/2026/11/a") and list(store.iter_keys()) == ["t/2026/11/a"]
     with pytest.raises(ValueError):
         store.put("../outside", b"x")
+
+
+def _zip(entries: dict[str, bytes]) -> bytes:
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        for name, data in entries.items():
+            z.writestr(name, data)
+    return buf.getvalue()
+
+
+def test_sniff_office_and_text():
+    ct = b'<?xml version="1.0"?><Types></Types>'
+    docx = _zip({"[Content_Types].xml": ct, "word/document.xml": b"<w/>"})
+    xlsx = _zip({"[Content_Types].xml": ct, "xl/workbook.xml": b"<x/>"})
+    pptx = _zip({"[Content_Types].xml": ct, "ppt/presentation.xml": b"<p/>"})
+    assert files.sniff(docx) == files.DOCX
+    assert files.sniff(xlsx) == files.XLSX
+    assert files.sniff(pptx) == files.PPTX
+    odt = _zip({"mimetype": files.ODT.encode(), "content.xml": b"<o/>"})
+    assert files.sniff(odt) == files.ODT
+    # macros, plain archives and binaries are refused
+    macro = (
+        b'<Types><Override ContentType="application/vnd.ms-word.document.macroEnabled.main+xml"/>'
+    )
+    assert files.sniff(_zip({"[Content_Types].xml": macro, "word/document.xml": b""})) is None
+    assert (
+        files.sniff(
+            _zip({"[Content_Types].xml": ct, "word/document.xml": b"", "word/vbaProject.bin": b""})
+        )
+        is None
+    )
+    assert files.sniff(_zip({"mimetype": files.ODT.encode(), "Basic/script.xml": b""})) is None
+    assert files.sniff(_zip({"a.exe": b"MZ"})) is None
+    assert files.sniff(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 100, "alt.doc") is None
+    # text by extension, only when it is text
+    assert files.sniff("Grüezi\nmiteinander".encode(), "notiz.txt") == files.TXT
+    assert files.sniff(b"a;b\n1;2\n", "liste.CSV") == files.CSV
+    assert files.sniff("caf\xe9".encode("latin-1"), "alt.txt") == files.TXT
+    assert files.sniff(b"MZ\x00\x01binary", "trick.txt") is None
+    assert files.sniff(b"plain", "notiz.md") is None
+    assert files.clean_filename("Offerte 2026.DOCX", files.DOCX) == "Offerte 2026.docx"
+
+
+def test_upload_office_document(api, make_user):
+    enrol(api, make_user())
+    ct = b'<?xml version="1.0"?><Types></Types>'
+    docx = _zip({"[Content_Types].xml": ct, "word/document.xml": b"<w/>"})
+    att = _upload(api, docx, name="Protokoll.docx").json()
+    assert att["content_type"] == files.DOCX and not att["is_image"]
+    assert _upload(api, b"a;b\n", name="liste.csv").json()["content_type"] == "text/csv"

@@ -1,7 +1,7 @@
 """Aufgaben module: simple to-do lists for individuals and small teams.
 
 Spec: docs/concept/modules/aufgaben.md. Registered with the core in setup():
-API router, search provider, file access for task pictures, inbox action "Erledigt",
+API router, search provider, file access for task attachments, inbox action "Erledigt",
 handler for core.user.deactivated, home widget "Heute fällig", jobs for due-date
 reminders and retention of done tasks.
 """

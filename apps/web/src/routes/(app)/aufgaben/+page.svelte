@@ -5,6 +5,8 @@
 	import { ApiError, post, send } from '#lib/api.ts';
 	import { formatter } from '#lib/format.ts';
 	import Icon from '#lib/components/Icon.svelte';
+	import Attachments from './Attachments.svelte';
+	import Checklist from './Checklist.svelte';
 	import ListsDialog from './ListsDialog.svelte';
 	import type { Person, Task, TaskDetail } from './+page.server.ts';
 	import type { PageProps } from './$types';
@@ -39,11 +41,13 @@
 		assignee_not_member: 'Zuweisen kannst du nur Mitgliedern der Liste.',
 		forbidden: 'Dafür fehlt dir die Berechtigung.',
 		not_found: 'Diese Aufgabe gibt es nicht mehr.',
-		file_type: 'Dieses Format geht nicht. Erlaubt sind JPG, PNG, WebP, GIF und HEIC.',
-		file_too_large: 'Das Bild ist zu gross.',
+		file_type:
+			'Dieses Format geht nicht. Erlaubt sind Bilder, PDF, Word, Excel, PowerPoint, OpenDocument, TXT und CSV, ohne Makros.',
+		file_too_large: 'Die Datei ist zu gross (höchstens 15 MB).',
 		file_infected: 'Die Datei wurde vom Virenschutz abgelehnt.',
 		scan_unavailable: 'Der Virenschutz ist gerade nicht erreichbar. Versuche es später.',
-		images_only: 'Hier kannst du nur Bilder anhängen.'
+		checklist_full: 'Eine Checkliste hat höchstens 50 Punkte.',
+		text_required: 'Ein Punkt braucht einen Text.'
 	};
 
 	function fail(e: unknown) {
@@ -138,41 +142,6 @@
 			await send('DELETE', `/aufgaben/tasks/${t.id}`);
 			await setParams({ aufgabe: null });
 		}, 'Aufgabe gelöscht.');
-
-	// --- pictures ----------------------------------------------------------------------------
-	async function upload(e: Event) {
-		const input = e.currentTarget as HTMLInputElement;
-		const chosen = Array.from(input.files ?? []);
-		input.value = '';
-		if (!detail || !chosen.length) return;
-		const id = detail.id;
-		await run(
-			async () => {
-				const ids: string[] = [];
-				for (const f of chosen) {
-					const res = await fetch('/api/v1/files?module=aufgaben', {
-						method: 'POST',
-						headers: {
-							'content-type': f.type || 'application/octet-stream',
-							'x-filename': encodeURIComponent(f.name)
-						},
-						body: f,
-						credentials: 'same-origin'
-					});
-					if (!res.ok) {
-						const body = await res.json().catch(() => ({}));
-						throw new ApiError(res.status, body.detail ?? `http_${res.status}`);
-					}
-					ids.push((await res.json()).id);
-				}
-				await post(`/aufgaben/tasks/${id}/images`, { attachment_ids: ids });
-			},
-			chosen.length > 1 ? `${chosen.length} Bilder hinzugefügt.` : 'Bild hinzugefügt.'
-		);
-	}
-
-	const removeImage = (taskId: string, attId: string) =>
-		run(() => send('DELETE', `/aufgaben/tasks/${taskId}/images/${attId}`));
 
 	// --- display helpers ---------------------------------------------------------------------
 	const isMe = (p: Person | null) => !!p && p.id === myId;
@@ -291,14 +260,25 @@
 							<button type="button" class="tbtn" onclick={() => select(t)}>
 								<span class="tt" class:done={t.status === 'done'}>{t.title}</span>
 								<span class="meta">
-									<span class="tag {t.due_tone}">{t.due_label}</span>
+									{#if t.due_date || t.status === 'done'}<span class="tag {t.due_tone}"
+											>{t.due_label}</span
+										>{/if}
 									{#if !data.list && t.list_kind === 'shared'}<span class="lst">{t.list_name}</span
 										>{/if}
 									{#if t.created_by && !isMe(t.created_by) && isMe(t.assignee)}<span
 											>von {t.created_by.display_name}</span
 										>{/if}
-									{#if t.images}<span class="imgs" title="Bilder"
-											><Icon name="camera" size={14} />{t.images}</span
+									{#if t.checklist_total}<span
+											class="chk"
+											class:full={t.checklist_done === t.checklist_total}
+											title="Checkliste: {t.checklist_done} von {t.checklist_total} erledigt"
+											><Icon
+												name="list-check"
+												size={14}
+											/>{t.checklist_done}/{t.checklist_total}</span
+										>{/if}
+									{#if t.attachments_count}<span class="imgs" title="Anhänge"
+											><Icon name="paperclip" size={14} />{t.attachments_count}</span
 										>{/if}
 								</span>
 							</button>
@@ -397,38 +377,9 @@
 						<textarea class="input note" rows="4" bind:value={note} onblur={saveNote}></textarea>
 					</label>
 
-					<div class="pics">
-						<span class="label">Bilder</span>
-						<div class="grid">
-							{#each detail.attachments as a (a.id)}
-								<figure>
-									<a href={a.url} target="_blank" rel="noopener" title={a.filename}>
-										<img src={a.url} alt={a.filename} loading="lazy" />
-									</a>
-									<button
-										type="button"
-										class="rm"
-										aria-label="Bild entfernen: {a.filename}"
-										onclick={() => removeImage(detail.id, a.id)}>×</button
-									>
-								</figure>
-							{/each}
-							<label class="addpic">
-								<Icon name="camera" size={22} />
-								<span>Bild hinzufügen</span>
-								<input
-									class="sr-only"
-									type="file"
-									accept="image/*"
-									capture="environment"
-									multiple
-									disabled={busy}
-									onchange={upload}
-								/>
-							</label>
-						</div>
-						<small>JPG, PNG, WebP oder HEIC. Auf dem Handy direkt mit der Kamera.</small>
-					</div>
+					<Checklist task={detail} {busy} {run} onfinish={() => toggle(detail)} />
+
+					<Attachments task={detail} {busy} {run} localization={data.shell.user?.localization} />
 				</div>
 				<div class="dfoot">
 					{#if detail.can_delete}
@@ -463,7 +414,7 @@
 				<p class="pick">
 					{data.detailMissing
 						? 'Diese Aufgabe gibt es nicht mehr oder du siehst sie nicht.'
-						: 'Wähle eine Aufgabe, um Fälligkeit, Zuständigkeit, Notiz und Bilder zu sehen.'}
+						: 'Wähle eine Aufgabe, um Fälligkeit, Zuständigkeit, Notiz, Checkliste und Anhänge zu sehen.'}
 				</p>
 			{/if}
 		</section>
@@ -678,6 +629,9 @@
 		color: var(--muted);
 		text-decoration: line-through;
 	}
+	.meta:empty {
+		display: none;
+	}
 	.meta {
 		display: flex;
 		flex-wrap: wrap;
@@ -708,6 +662,15 @@
 		padding: 1px 0;
 		background: transparent;
 		color: var(--muted);
+	}
+	.chk {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+	}
+	.chk.full {
+		color: var(--ok-ink);
+		font-weight: 600;
 	}
 	.imgs {
 		display: inline-flex;
@@ -822,75 +785,6 @@
 		font-size: 15px;
 		font-weight: 400;
 		resize: vertical;
-	}
-	.pics {
-		display: flex;
-		flex-direction: column;
-		gap: 8px;
-	}
-	.pics .label {
-		color: var(--ink-2);
-		font-size: 14px;
-		font-weight: 600;
-	}
-	.pics small {
-		color: var(--muted);
-		font-size: 12px;
-	}
-	.grid {
-		display: grid;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
-		gap: 10px;
-	}
-	figure {
-		position: relative;
-		overflow: hidden;
-		aspect-ratio: 1;
-		margin: 0;
-		border-radius: 10px;
-		background: var(--line-3);
-	}
-	figure img {
-		display: block;
-		width: 100%;
-		height: 100%;
-		object-fit: cover;
-	}
-	.rm {
-		position: absolute;
-		top: 4px;
-		right: 4px;
-		width: 28px;
-		height: 28px;
-		border: 0;
-		border-radius: 50%;
-		background: rgb(0 0 0 / 0.55);
-		color: #fff;
-		font-size: 18px;
-		line-height: 1;
-		cursor: pointer;
-	}
-	.addpic {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		justify-content: center;
-		gap: 6px;
-		box-sizing: border-box;
-		aspect-ratio: 1;
-		padding: 6px;
-		border: 1.5px dashed color-mix(in oklab, var(--primary) 40%, var(--surface));
-		border-radius: 10px;
-		background: color-mix(in oklab, var(--primary) 7%, var(--surface));
-		color: var(--primary-strong);
-		font-size: 13px;
-		font-weight: 600;
-		text-align: center;
-		cursor: pointer;
-	}
-	.addpic:focus-within {
-		outline: 2px solid var(--primary);
-		outline-offset: 2px;
 	}
 	.dfoot {
 		display: flex;

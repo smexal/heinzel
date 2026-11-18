@@ -2,7 +2,7 @@
 
 Visibility: a task is visible to the members of its list and to its assignee. Members may do
 everything with the list's tasks; an assignee who is not a member may edit, complete and add
-pictures, but not delete or move the task. Every write is audited and keeps the search index
+attachments, but not delete or move the task. Every write is audited and keeps the search index
 and Mein Eingang current in the same transaction.
 """
 
@@ -17,7 +17,7 @@ from heinzel_api.tenants import TenantConfig
 from sqlalchemy import and_, delete, exists, func, or_, select
 from sqlalchemy.orm import Session
 
-from .models import Task, TaskList, TaskListMember
+from .models import Task, TaskCheckItem, TaskList, TaskListMember
 
 MODULE = "aufgaben"
 USE = "aufgaben.use"
@@ -328,6 +328,7 @@ def create_task(
     due_date: date | None = None,
     assignee_id: uuid.UUID | None = None,
     note: str = "",
+    checklist: list[str] | None = None,
 ) -> Task:
     title = " ".join(title.split())
     if not title:
@@ -345,6 +346,8 @@ def create_task(
     s.add(task)
     s.flush()
     _audit(s, actor, "aufgaben.task.created", "task", task.id, {"title": task.title})
+    for text in checklist or []:
+        _add_item(s, actor, task, text)
     if assignee_id is not None:
         _assign(s, actor, task, lst, assignee_id)
     index_task(s, actor, task, lst)
@@ -428,12 +431,11 @@ def _deliver_assignment(s: Session, actor: Actor, task: Task, lst: TaskList, ren
         return
     name = list_name(lst, actor.settings)
     due = due_label(task.due_date, actor.today)
-    imgs = [
-        a.id
-        for a in files.for_target(s, module=MODULE, target_type="task", target_id=str(task.id))
-        if a.content_type in files.IMAGE_TYPES
+    atts = [
+        a.id for a in files.for_target(s, module=MODULE, target_type="task", target_id=str(task.id))
     ]
     creator = s.get(User, task.created_by) if task.created_by else None
+    total, done_n = checklist_counts(s, [task.id]).get(task.id, (0, 0))
     inbox.deliver(
         s,
         actor.tenant_id,
@@ -445,10 +447,11 @@ def _deliver_assignment(s: Session, actor: Actor, task: Task, lst: TaskList, ren
         body=task.note or None,
         reason="Die Aufgabe wurde dir zugewiesen.",
         facts=[("Liste", name), ("Fällig", due)]
+        + ([("Checkliste", f"{done_n} von {total}")] if total else [])
         + ([("Erstellt von", creator.display_name)] if creator else []),
         link=f"/aufgaben?aufgabe={task.id}",
         actions=[inbox.Action("done", "Erledigt", "primary")],
-        attachments=imgs,
+        attachments=atts,
         ref_type="task",
         ref_id=str(task.id),
         actor_user_id=actor.user_id,
@@ -517,14 +520,139 @@ def _forget_task(s: Session, actor: Actor, task: Task, storage) -> None:
     search.remove(s, actor.tenant_id, module=MODULE, entity_type="task", entity_id=str(task.id))
 
 
-# --- pictures --------------------------------------------------------------------------------
+# --- checklist -------------------------------------------------------------------------------
+
+MAX_CHECK_ITEMS = 50
 
 
-def images(s: Session, task: Task) -> list:
+def check_items(s: Session, task_id: uuid.UUID) -> list[TaskCheckItem]:
+    return list(
+        s.scalars(
+            select(TaskCheckItem)
+            .where(TaskCheckItem.task_id == task_id)
+            .order_by(TaskCheckItem.position, TaskCheckItem.created_at)
+        )
+    )
+
+
+def checklist_counts(s: Session, task_ids: list[uuid.UUID]) -> dict[uuid.UUID, tuple[int, int]]:
+    """task id -> (points, done points)."""
+    if not task_ids:
+        return {}
+    rows = s.execute(
+        select(
+            TaskCheckItem.task_id,
+            func.count(),
+            func.count().filter(TaskCheckItem.done.is_(True)),
+        )
+        .where(TaskCheckItem.task_id.in_(task_ids))
+        .group_by(TaskCheckItem.task_id)
+    ).all()
+    return {r[0]: (r[1], r[2]) for r in rows}
+
+
+def _clean_item(text: str) -> str:
+    text = " ".join((text or "").split())
+    if not text:
+        raise Invalid("text_required")
+    return text[:200]
+
+
+def _add_item(s: Session, actor: Actor, task: Task, text: str) -> TaskCheckItem:
+    items = check_items(s, task.id)
+    if len(items) >= MAX_CHECK_ITEMS:
+        raise Invalid("checklist_full")
+    item = TaskCheckItem(
+        tenant_id=actor.tenant_id,
+        task_id=task.id,
+        text=_clean_item(text),
+        position=(items[-1].position + 1) if items else 0,
+        created_by=actor.user_id,
+    )
+    s.add(item)
+    s.flush()
+    return item
+
+
+def _checklist_changed(
+    s: Session, actor: Actor, task: Task, lst: TaskList, op: str, item: TaskCheckItem
+) -> None:
+    _audit(
+        s,
+        actor,
+        "aufgaben.task.checklist_changed",
+        "task",
+        task.id,
+        {"op": op, "item": str(item.id), "text": item.text},
+    )
+    task.updated_at = datetime.now(UTC)
+    if task.assignee_id and task.status == "open" and task.assignee_id != actor.user_id:
+        _deliver_assignment(s, actor, task, lst, renew=False)
+    index_task(s, actor, task, lst)
+    s.flush()
+
+
+def add_check_item(s: Session, actor: Actor, task_id: uuid.UUID, text: str) -> TaskCheckItem:
+    task, lst, _ = get_task(s, actor, task_id)
+    item = _add_item(s, actor, task, text)
+    _checklist_changed(s, actor, task, lst, "added", item)
+    return item
+
+
+def _get_item(s: Session, task: Task, item_id: uuid.UUID) -> TaskCheckItem:
+    item = s.get(TaskCheckItem, item_id)
+    if item is None or item.task_id != task.id:
+        raise NotFound()
+    return item
+
+
+def update_check_item(
+    s: Session, actor: Actor, task_id: uuid.UUID, item_id: uuid.UUID, changes: dict
+) -> TaskCheckItem:
+    """changes: any of text, done (idempotent), position (new index in the list)."""
+    task, lst, _ = get_task(s, actor, task_id)
+    item = _get_item(s, task, item_id)
+    ops = []
+    if "text" in changes and changes["text"] is not None:
+        text = _clean_item(changes["text"])
+        if text != item.text:
+            item.text = text
+            ops.append("renamed")
+    if "done" in changes and changes["done"] is not None and bool(changes["done"]) != item.done:
+        item.done = bool(changes["done"])
+        item.done_at = datetime.now(UTC) if item.done else None
+        item.done_by = actor.user_id if item.done else None
+        ops.append("checked" if item.done else "unchecked")
+    if "position" in changes and changes["position"] is not None:
+        items = check_items(s, task.id)
+        old = items.index(item)
+        new = max(0, min(int(changes["position"]), len(items) - 1))
+        if new != old:
+            items.insert(new, items.pop(old))
+            for i, it in enumerate(items):
+                it.position = i
+            ops.append("moved")
+    for op in ops:
+        _checklist_changed(s, actor, task, lst, op, item)
+    return item
+
+
+def delete_check_item(s: Session, actor: Actor, task_id: uuid.UUID, item_id: uuid.UUID) -> None:
+    task, lst, _ = get_task(s, actor, task_id)
+    item = _get_item(s, task, item_id)
+    s.delete(item)
+    s.flush()
+    _checklist_changed(s, actor, task, lst, "removed", item)
+
+
+# --- attachments (pictures and documents) ----------------------------------------------
+
+
+def attachments(s: Session, task: Task) -> list:
     return files.for_target(s, module=MODULE, target_type="task", target_id=str(task.id))
 
 
-def add_images(s: Session, actor: Actor, task_id: uuid.UUID, ids: list[uuid.UUID]) -> list:
+def add_attachments(s: Session, actor: Actor, task_id: uuid.UUID, ids: list[uuid.UUID]) -> list:
     task, _lst, _ = get_task(s, actor, task_id)
     try:
         atts = files.link(
@@ -537,24 +665,29 @@ def add_images(s: Session, actor: Actor, task_id: uuid.UUID, ids: list[uuid.UUID
         )
     except files.UploadRejected as e:
         raise Invalid(e.code) from e
-    if any(a.content_type not in files.IMAGE_TYPES for a in atts):
-        raise Invalid("images_only")
     _audit(
-        s, actor, "aufgaben.task.images_added", "task", task.id, {"files": [str(i) for i in ids]}
+        s,
+        actor,
+        "aufgaben.task.attachments_added",
+        "task",
+        task.id,
+        {"files": [str(i) for i in ids]},
     )
     return atts
 
 
-def remove_image(s: Session, actor: Actor, task_id: uuid.UUID, att_id: uuid.UUID, storage) -> None:
+def remove_attachment(
+    s: Session, actor: Actor, task_id: uuid.UUID, att_id: uuid.UUID, storage
+) -> None:
     task, _lst, _ = get_task(s, actor, task_id)
-    att = next((a for a in images(s, task) if a.id == att_id), None)
+    att = next((a for a in attachments(s, task) if a.id == att_id), None)
     if att is None:
         raise NotFound()
     files.delete(s, storage, att)
-    _audit(s, actor, "aufgaben.task.image_removed", "task", task.id, {"file": str(att_id)})
+    _audit(s, actor, "aufgaben.task.attachment_removed", "task", task.id, {"file": str(att_id)})
 
 
-def image_counts(s: Session, task_ids: list[uuid.UUID]) -> dict[str, int]:
+def attachment_counts(s: Session, task_ids: list[uuid.UUID]) -> dict[str, int]:
     if not task_ids:
         return {}
     rows = s.execute(
@@ -593,7 +726,7 @@ def index_task(s: Session, actor: Actor, task: Task, lst: TaskList) -> None:
         entity_type="task",
         entity_id=str(task.id),
         title=task.title,
-        body=task.note,
+        body="\n".join([task.note, *(i.text for i in check_items(s, task.id))]).strip(),
         meta=meta,
         link=f"/aufgaben?aufgabe={task.id}",
         permission=USE,
@@ -730,7 +863,7 @@ def due_reminders(s: Session, tenant_id: uuid.UUID, tenant: TenantConfig, settin
 
 
 def purge_done(s: Session, tenant_id: uuid.UUID, settings: dict, storage, now: datetime) -> int:
-    """Delete done tasks older than the retention setting, with their pictures."""
+    """Delete done tasks older than the retention setting, with their attachments."""
     months = settings.get("delete_done_after_months", 24)
     if months is None:
         return 0

@@ -12,9 +12,11 @@ that shows the file may see it too.
 """
 
 import hashlib
+import io
 import socket
 import struct
 import uuid
+import zipfile
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -31,11 +33,84 @@ if TYPE_CHECKING:
 # --- content types (sniffed from the bytes, never taken from the client) ----------------------
 
 IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif", "image/heic"}
-DOCUMENT_TYPES = {"application/pdf"}
+PDF = "application/pdf"
+DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+PPTX = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+ODT = "application/vnd.oasis.opendocument.text"
+ODS = "application/vnd.oasis.opendocument.spreadsheet"
+ODP = "application/vnd.oasis.opendocument.presentation"
+TXT = "text/plain"
+CSV = "text/csv"
+# Common office files. Not accepted: anything that can carry macros (docm, xlsm, the old
+# binary doc/xls/ppt, ODF with Basic scripts), archives, executables, HTML, SVG.
+DOCUMENT_TYPES = {PDF, DOCX, XLSX, PPTX, ODT, ODS, ODP, TXT, CSV}
 ALLOWED_TYPES = IMAGE_TYPES | DOCUMENT_TYPES
 
+EXTENSIONS = {
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+    "image/gif": "gif",
+    "image/heic": "heic",
+    PDF: "pdf",
+    DOCX: "docx",
+    XLSX: "xlsx",
+    PPTX: "pptx",
+    ODT: "odt",
+    ODS: "ods",
+    ODP: "odp",
+    TXT: "txt",
+    CSV: "csv",
+}
 
-def sniff(data: bytes) -> str | None:
+_OOXML_MAIN = {"word/document.xml": DOCX, "xl/workbook.xml": XLSX, "ppt/presentation.xml": PPTX}
+_ODF = {ODT, ODS, ODP}
+
+
+def _sniff_zip(data: bytes) -> str | None:
+    """Office Open XML or OpenDocument by their structure; None for other archives and for
+    documents with macros."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            names = set(z.namelist())
+            if any(n.lower().endswith("vbaproject.bin") for n in names):
+                return None
+            if "[Content_Types].xml" in names:
+                types = z.read("[Content_Types].xml")[:200_000].lower()
+                if b"macroenabled" in types:
+                    return None
+                return next((t for part, t in _OOXML_MAIN.items() if part in names), None)
+            if "mimetype" in names:
+                mime = z.read("mimetype")[:100].decode("ascii", "replace").strip()
+                if mime in _ODF and not any(n.startswith(("Basic/", "Scripts/")) for n in names):
+                    return mime
+    except (zipfile.BadZipFile, KeyError, RuntimeError, ValueError):
+        return None
+    return None
+
+
+def _sniff_text(data: bytes, filename: str | None) -> str | None:
+    """Plain text and CSV have no signature: accepted by their extension when the bytes are
+    text (UTF-8 or Latin-1, no control characters besides tab and line breaks)."""
+    ext = (filename or "").rsplit(".", 1)[-1].lower() if "." in (filename or "") else ""
+    if ext not in ("txt", "csv") or b"\x00" in data:
+        return None
+    sample = data[:65536]
+    try:
+        text = sample.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        try:
+            sample[:-4].decode("utf-8")  # a multi-byte character cut at the sample's end
+            text = sample.decode("utf-8", "ignore")
+        except UnicodeDecodeError:
+            text = sample.decode("latin-1")
+    if any(ord(c) < 32 and c not in "\t\r\n\f" for c in text):
+        return None
+    return CSV if ext == "csv" else TXT
+
+
+def sniff(data: bytes, filename: str | None = None) -> str | None:
     if data.startswith(b"\xff\xd8\xff"):
         return "image/jpeg"
     if data.startswith(b"\x89PNG\r\n\x1a\n"):
@@ -47,19 +122,14 @@ def sniff(data: bytes) -> str | None:
     if data[4:8] == b"ftyp" and data[8:12] in (b"heic", b"heix", b"mif1", b"heif"):
         return "image/heic"
     if data.startswith(b"%PDF-"):
-        return "application/pdf"
-    return None
+        return PDF
+    if data.startswith(b"PK\x03\x04"):
+        return _sniff_zip(data)
+    return _sniff_text(data, filename)
 
 
 def clean_filename(name: str | None, content_type: str) -> str:
-    ext = {
-        "image/jpeg": "jpg",
-        "image/png": "png",
-        "image/webp": "webp",
-        "image/gif": "gif",
-        "image/heic": "heic",
-        "application/pdf": "pdf",
-    }[content_type]
+    ext = EXTENSIONS[content_type]
     base = (name or "").replace("\\", "/").split("/")[-1].strip()
     base = "".join(c for c in base if c.isprintable() and c not in '<>:"|?*')[:200]
     stem = base.rsplit(".", 1)[0] if "." in base else base
@@ -215,7 +285,7 @@ def store_upload(
         raise UploadRejected("empty_file")
     if len(data) > max_bytes:
         raise UploadRejected("file_too_large")
-    ctype = sniff(data)
+    ctype = sniff(data, filename)
     if ctype is None or ctype not in allowed:
         raise UploadRejected("file_type")
     status = scanner.scan(data)  # may raise ScanUnavailable

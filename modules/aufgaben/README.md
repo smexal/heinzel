@@ -20,6 +20,8 @@ Status: v1 implemented (everything in the spec except the MCP tools, which come 
 Behaviour worth knowing:
 - Every user gets a personal list on first use; its name comes from the module setting.
 - A task is visible to the members of its list and to its assignee. Only members delete or move it.
+- A task has a checklist (points with text, done, position) and attachments: pictures and common
+  documents (PDF, Office, OpenDocument, TXT/CSV) through the core files service.
 - Assigning someone puts "Zugewiesen: …" with the action "Erledigt" into their Mein Eingang;
   reassigning moves it, completing closes it and sends the creator a notice.
 - Reminders (job every 15 min): one per due date, to the assignee or else the creator; e-mail too

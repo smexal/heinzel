@@ -40,6 +40,7 @@ mcp:
     - { name: aufgaben.task.list, title: { de: Eigene und geteilte Aufgaben abfragen }, permission: aufgaben.use, annotations: { readOnlyHint: true } }
     - { name: aufgaben.task.create, title: { de: Aufgabe erfassen }, permission: aufgaben.use, annotations: { readOnlyHint: false, idempotentHint: true } }
     - { name: aufgaben.task.complete, title: { de: Aufgabe als erledigt markieren }, permission: aufgaben.use, annotations: { readOnlyHint: false, idempotentHint: true } }
+    - { name: aufgaben.task.check, title: { de: Punkt der Checkliste abhaken }, permission: aufgaben.use, annotations: { readOnlyHint: false, idempotentHint: true } }
   resources: ["heinzel://aufgaben/lists/{id}"]
   prompts:
     - { name: heute-faellig, title: { de: "Geführter Prompt: Was ist heute fällig?" } }

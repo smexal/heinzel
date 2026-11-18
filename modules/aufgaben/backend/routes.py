@@ -106,13 +106,24 @@ class TaskOut(BaseModel):
     assignee: Person | None
     created_by: Person | None
     created_at: datetime
-    images: int
+    attachments_count: int
+    checklist_total: int
+    checklist_done: int
     can_delete: bool
+
+
+class CheckItemOut(BaseModel):
+    id: str
+    text: str
+    done: bool
+    done_at: datetime | None
+    done_by: Person | None
 
 
 class TaskDetail(TaskOut):
     attachments: list[AttachmentOut]
     assignable: list[Person]
+    checklist: list[CheckItemOut]
 
 
 class TasksOut(BaseModel):
@@ -139,7 +150,8 @@ def _task_outs(s: Session, actor: svc.Actor, rows: list[Task]) -> list[TaskOut]:
     }
     user_ids = {u for t in rows for u in (t.assignee_id, t.created_by, t.done_by) if u}
     users = {u.id: u for u in s.scalars(select(User).where(User.id.in_(user_ids)))}
-    imgs = svc.image_counts(s, [t.id for t in rows])
+    imgs = svc.attachment_counts(s, [t.id for t in rows])
+    checks = svc.checklist_counts(s, [t.id for t in rows])
     out = []
     for t in rows:
         lst = lists[t.list_id]
@@ -162,7 +174,9 @@ def _task_outs(s: Session, actor: svc.Actor, rows: list[Task]) -> list[TaskOut]:
                 assignee=_person(users.get(t.assignee_id)),
                 created_by=_person(users.get(t.created_by)),
                 created_at=t.created_at,
-                images=imgs.get(str(t.id), 0),
+                attachments_count=imgs.get(str(t.id), 0),
+                checklist_total=checks.get(t.id, (0, 0))[0],
+                checklist_done=checks.get(t.id, (0, 0))[1],
                 can_delete=t.list_id in member_of,
             )
         )
@@ -178,10 +192,25 @@ def _assignable(s: Session, actor: svc.Actor, lst: TaskList) -> list[Person]:
 
 def _detail(s: Session, actor: svc.Actor, task: Task, lst: TaskList) -> TaskDetail:
     base = _task_outs(s, actor, [task])[0]
+    items = svc.check_items(s, task.id)
+    doers = {
+        u.id: u
+        for u in s.scalars(select(User).where(User.id.in_({i.done_by for i in items if i.done_by})))
+    }
     return TaskDetail(
         **base.model_dump(),
-        attachments=[attachment_out(a) for a in svc.images(s, task)],
+        attachments=[attachment_out(a) for a in svc.attachments(s, task)],
         assignable=_assignable(s, actor, lst),
+        checklist=[
+            CheckItemOut(
+                id=str(i.id),
+                text=i.text,
+                done=i.done,
+                done_at=i.done_at,
+                done_by=_person(doers.get(i.done_by)),
+            )
+            for i in items
+        ],
     )
 
 
@@ -330,6 +359,9 @@ class TaskIn(BaseModel):
     due_date: date | None = None
     assignee_id: uuid.UUID | None = None
     note: str = Field("", max_length=10000)
+    checklist: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field(
+        default_factory=list, max_length=svc.MAX_CHECK_ITEMS
+    )
 
 
 @router.post("/tasks", response_model=TaskDetail, status_code=201)
@@ -393,27 +425,78 @@ def delete_task(task_id: uuid.UUID, request: Request, p: UseDep, tenant: TenantD
         svc.delete_task(s, actor, task_id, request.app.state.storage)
 
 
-class ImagesIn(BaseModel):
+class AttachmentsIn(BaseModel):
     attachment_ids: list[uuid.UUID] = Field(min_length=1, max_length=20)
 
 
-@router.post("/tasks/{task_id}/images", response_model=TaskDetail)
-def add_images(
-    task_id: uuid.UUID, body: ImagesIn, request: Request, p: UseDep, tenant: TenantDep
+@router.post("/tasks/{task_id}/attachments", response_model=TaskDetail)
+def add_attachments(
+    task_id: uuid.UUID, body: AttachmentsIn, request: Request, p: UseDep, tenant: TenantDep
 ) -> TaskDetail:
     actor = _actor(request, p, tenant)
     with _session(request, actor) as s:
-        svc.add_images(s, actor, task_id, body.attachment_ids)
+        svc.add_attachments(s, actor, task_id, body.attachment_ids)
         task, lst, _ = svc.get_task(s, actor, task_id)
         return _detail(s, actor, task, lst)
 
 
-@router.delete("/tasks/{task_id}/images/{attachment_id}", response_model=TaskDetail)
-def remove_image(
+@router.delete("/tasks/{task_id}/attachments/{attachment_id}", response_model=TaskDetail)
+def remove_attachment(
     task_id: uuid.UUID, attachment_id: uuid.UUID, request: Request, p: UseDep, tenant: TenantDep
 ) -> TaskDetail:
     actor = _actor(request, p, tenant)
     with _session(request, actor) as s:
-        svc.remove_image(s, actor, task_id, attachment_id, request.app.state.storage)
+        svc.remove_attachment(s, actor, task_id, attachment_id, request.app.state.storage)
+        task, lst, _ = svc.get_task(s, actor, task_id)
+        return _detail(s, actor, task, lst)
+
+
+# --- checklist --------------------------------------------------------------------------------
+
+
+class CheckItemIn(BaseModel):
+    text: str = Field(min_length=1, max_length=200)
+
+
+class CheckItemPatch(BaseModel):
+    text: str | None = Field(None, min_length=1, max_length=200)
+    done: bool | None = None
+    position: int | None = Field(None, ge=0)
+
+
+@router.post("/tasks/{task_id}/checklist", response_model=TaskDetail, status_code=201)
+def add_check_item(
+    task_id: uuid.UUID, body: CheckItemIn, request: Request, p: UseDep, tenant: TenantDep
+) -> TaskDetail:
+    actor = _actor(request, p, tenant)
+    with _session(request, actor) as s:
+        svc.add_check_item(s, actor, task_id, body.text)
+        task, lst, _ = svc.get_task(s, actor, task_id)
+        return _detail(s, actor, task, lst)
+
+
+@router.patch("/tasks/{task_id}/checklist/{item_id}", response_model=TaskDetail)
+def update_check_item(
+    task_id: uuid.UUID,
+    item_id: uuid.UUID,
+    body: CheckItemPatch,
+    request: Request,
+    p: UseDep,
+    tenant: TenantDep,
+) -> TaskDetail:
+    actor = _actor(request, p, tenant)
+    with _session(request, actor) as s:
+        svc.update_check_item(s, actor, task_id, item_id, body.model_dump(exclude_unset=True))
+        task, lst, _ = svc.get_task(s, actor, task_id)
+        return _detail(s, actor, task, lst)
+
+
+@router.delete("/tasks/{task_id}/checklist/{item_id}", response_model=TaskDetail)
+def delete_check_item(
+    task_id: uuid.UUID, item_id: uuid.UUID, request: Request, p: UseDep, tenant: TenantDep
+) -> TaskDetail:
+    actor = _actor(request, p, tenant)
+    with _session(request, actor) as s:
+        svc.delete_check_item(s, actor, task_id, item_id)
         task, lst, _ = svc.get_task(s, actor, task_id)
         return _detail(s, actor, task, lst)

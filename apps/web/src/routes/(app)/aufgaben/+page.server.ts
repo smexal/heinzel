@@ -37,13 +37,31 @@ export type Task = {
 	assignee: Person | null;
 	created_by: Person | null;
 	created_at: string;
-	images: number;
+	attachments_count: number;
+	checklist_total: number;
+	checklist_done: number;
 	can_delete: boolean;
 };
 
+export type CheckItem = {
+	id: string;
+	text: string;
+	done: boolean;
+	done_at: string | null;
+	done_by: Person | null;
+};
+
 export type TaskDetail = Task & {
-	attachments: { id: string; filename: string; url: string; is_image: boolean }[];
+	attachments: {
+		id: string;
+		filename: string;
+		content_type: string;
+		size: number;
+		url: string;
+		is_image: boolean;
+	}[];
 	assignable: Person[];
+	checklist: CheckItem[];
 };
 
 export type Tasks = { tasks: Task[]; open: number; done: number };

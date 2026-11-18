@@ -32,7 +32,8 @@ Access to a shared list comes from membership, not from a role.
 5. As list member, I want to assign a task to another member, who then gets it in Mein Eingang. (v1)
 6. As staff, I want to see what is due today on the Übersicht. (v1)
 7. As staff, I want to ask an AI client "what is due today?" or "add task X". (v1)
-8. As staff, I want to add pictures to a task (on the phone directly from the camera), so others see what is meant. (v1) Later: recurring tasks, checklists inside a task, other file types.
+8. As staff, I want to attach pictures and documents to a task (PDF, Office, OpenDocument, text; pictures on the phone directly from the camera), so others have what they need. (v1) Later: recurring tasks, more file types.
+9. As staff, I want to break a task into a checklist of small steps and tick them off one by one, so I and others see how far it is. (v1)
 
 ## 4. Data
 
@@ -41,12 +42,13 @@ Access to a shared list comes from membership, not from a role.
 | `task_list` | name, kind (personal or shared), owner\_id |
 | `task_list_member` | list\_id, user\_id, role (owner or member) |
 | `task` | list\_id, title, note, due\_date, assignee\_id, status (open or done), done\_at, done\_by, position, created\_by |
+| `task_check_item` | task\_id, text, done, done\_at, done\_by, position, created\_by (at most 50 points per task, 200 characters each) |
 
-No sensitive fields by design; notes can contain personal information, so a task is only visible to members of its list. Retention: done tasks are deleted after the period set in the module settings (default 24 months), together with their images. Images are core attachments (files service, per-tenant storage, virus scan) linked to the task and visible only to members of the task's list.
+No sensitive fields by design; notes can contain personal information, so a task is only visible to members of its list. Retention: done tasks are deleted after the period set in the module settings (default 24 months), together with their attachments. Attachments (pictures and documents) are core files (files service, per-tenant storage, virus scan) linked to the task and visible only to members of the task's list.
 
 ## 5. Core services used
 
-Identity, permissions, inbox, notifications, audit, directory (members), search, files (task images). Own tables instead of the work items engine, to stay simple.
+Identity, permissions, inbox, notifications, audit, directory (members), search, files (task attachments). Own tables instead of the work items engine, to stay simple.
 
 ## 6. Permissions
 
@@ -57,7 +59,9 @@ Identity, permissions, inbox, notifications, audit, directory (members), search,
 
 ## 7. UI and contributions
 
-Navigation: a single entry "Aufgaben" in the top section below Mein Eingang, without sub-navigation; switching lists happens on the page. Screen: one list with quick-add field, sorted by due date, due date as a tag, switch "Erledigte anzeigen", picture count in the task line, image gallery and "Bild hinzufügen" (camera on phones) in the detail panel, checkbox per task, detail panel (due date, assignee, creator, note). Quick action "Aufgabe erfassen" and home widget "Heute fällig". Inbox: task "Zugewiesen: …" with actions Erledigt and Öffnen; notice to the creator when an assigned task is done. Search provider: tasks by title and note.
+Navigation: a single entry "Aufgaben" in the top section below Mein Eingang, without sub-navigation; switching lists happens on the page. Screen: one list with quick-add field, sorted by due date, due date as a tag (nothing shown when a task has none), switch "Erledigte anzeigen", attachment count and checklist progress (e.g. 2/4) in the task line, attachments in the detail panel (pictures as thumbnails, documents as lines with type and size; "Foto aufnehmen" on phones and tablets, "Datei hinzufügen" everywhere), checkbox per task, detail panel (due date, assignee, creator, note). Quick action "Aufgabe erfassen" and home widget "Heute fällig". Inbox: task "Zugewiesen: …" with actions Erledigt and Öffnen; notice to the creator when an assigned task is done. Search provider: tasks by title and note.
+
+Checklist: a section "Checkliste" in the detail panel, between note and attachments. Progress bar and "2 von 4 erledigt"; each point has a checkbox, can be renamed in place, dragged into a new order (or moved with Alt+↑/↓) and removed; a field below adds the next point with Enter. Everyone who may edit the task may edit its checklist. When every point is done and the task is still open, a note offers "Aufgabe abschliessen"; the task is never closed automatically, and closing the task leaves the points as they are. The task line shows the progress (green when complete); the assignee's inbox item lists it as a fact ("Checkliste: 2 von 4"); search also finds tasks by the text of their points.
 
 Module settings (`settings_schema`, edited under Administration › Module › Aufgaben):
 
@@ -78,6 +82,7 @@ Module settings (`settings_schema`, edited under Administration › Module › A
 | `aufgaben.task.list` (filter: list, due, assignee) | `aufgaben.use` | Read |
 | `aufgaben.task.create` | `aufgaben.use` | Write |
 | `aufgaben.task.complete` | `aufgaben.use` | Write, idempotent |
+| `aufgaben.task.check` (tick or untick a checklist point; create also takes points) | `aufgaben.use` | Write, idempotent |
 | Resource `heinzel://aufgaben/lists/{id}` | `aufgaben.use` | Read |
 | Prompt `heute-faellig` | `aufgaben.use` | Read |
 
@@ -101,9 +106,10 @@ None required. Optional CSV import of existing to-do lists later.
 - **Code:** modules/aufgaben/backend (setup, service, routes, models, migrations in schema mod\_aufgaben), UI in apps/web/src/routes/(app)/aufgaben, tests in apps/api/tests/test\_aufgaben.py. The rules sit in one service layer that the routes, the inbox action, the jobs and later the MCP tools share.
 - **Lists:** each user gets the personal list on first use; its name always comes from the setting "Name der persönlichen Liste". Shared lists are managed in a dialog on the page (create, rename, members, leave, delete).
 - **Visibility:** members of the task's list and the assignee. Only members delete a task or move it to another list. With "Zuweisen an: alle Benutzer" an assignee outside the list sees the task in "Alle meine Listen".
-- **Mein Eingang:** assigning delivers "Zugewiesen: …" with the action Erledigt and the task's pictures; reassigning moves it, completing closes it and notifies the creator ("Erledigt: …"). New members of a shared list get a notice.
+- **Mein Eingang:** assigning delivers "Zugewiesen: …" with the action Erledigt and the task's attachments; reassigning moves it, completing closes it and notifies the creator ("Erledigt: …"). New members of a shared list get a notice.
 - **Reminders:** a job every 15 minutes delivers one reminder per due date ("Heute fällig" or "Überfällig") to the assignee, else to the creator; with "Im Eingang und per E-Mail" an e-mail too. Changing the due date allows a new reminder.
-- **Retention:** a job every 6 hours deletes done tasks older than the setting, with their pictures (audited as one event per run).
+- **Retention:** a job every 6 hours deletes done tasks older than the setting, with their attachments (audited as one event per run).
 - **Deactivation:** open tasks of a deactivated user go back to the owner of the shared list (inbox item "Zurück bei dir"), in personal lists to nobody.
-- **Pictures:** core files service (sniffed type, virus scan, tenant storage); only images can be attached; visible to whoever may see the task.
+- **Attachments:** core files service (sniffed type, virus scan, tenant storage); pictures (JPEG, PNG, WebP, GIF, HEIC), PDF, Word/Excel/PowerPoint (docx, xlsx, pptx), OpenDocument (odt, ods, odp), TXT and CSV, up to 15 MB each; files that can carry macros (docm, xlsm, the old binary Office formats, ODF with scripts), archives and programs are refused. Documents download, pictures open in a new tab; visible to whoever may see the task.
+- **Checklist:** table task\_check\_item; API POST /tasks/{id}/checklist, PATCH and DELETE /tasks/{id}/checklist/{item} (text, done, position); create accepts the points too. Ticking, renaming, moving and removing are audited as aufgaben.task.checklist\_changed and refresh the assignee's inbox item and the search index.
 - **Search and Übersicht:** tasks are indexed with title and note and a status chip (Überfällig, Heute, Erledigt); the widget "Heute fällig" lists overdue and today's tasks that are assigned to the user or unassigned in their lists.
