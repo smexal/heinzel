@@ -43,4 +43,7 @@ policies show and accept only that tenant's rows. Migrations of new tenant table
 | `POST /api/v1/admin/users` | invite (mail with a 7-day link) |
 | `POST /api/v1/admin/users/{id}/invite \| deactivate \| activate \| mfa-reset` | |
 | `PUT /api/v1/admin/users/{id}/roles` | replace role assignments |
+| `GET /api/v1/me/preferences`, `PUT …` | language and regional settings: own values, tenant defaults, locks, options |
+| `GET /api/v1/admin/audit` | events, newest first; filters `q, actor, channel, area, since`; paging `before_id`; chain status (`core.audit.read`) |
+| `GET /api/v1/admin/audit/export.csv` | same filters as CSV (`;`, UTF-8 with BOM); the export is audited |
 | `GET /api/v1/admin/roles` | roles with expanded permissions and the permission catalogue |

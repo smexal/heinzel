@@ -30,7 +30,7 @@
 		busy = true;
 		try {
 			await post('/auth/password/set', { token: page.params.token, password });
-			await goto('/login?passwort=gesetzt', { replaceState: true });
+			await goto('/login?passwort=gesetzt', { replace: true });
 		} catch (err) {
 			const detail = err instanceof ApiError ? err.detail : '';
 			message =

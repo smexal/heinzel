@@ -452,7 +452,7 @@ All tenant-scoped tables carry `tenant_id`, `created_at`, `created_by`, `updated
 
 ## Implementation notes (Phase 1)
 
-The database, audit log, local login with TOTP, the protected web shell, invitations, password reset and the Benutzer & Rollen screen are built. Where the build refines the model above, this table records how.
+The database, audit log, local login with TOTP, the protected web shell, invitations, password reset, Benutzer & Rollen, the Audit-Log viewer and Mein Profil are built. Where the build refines the model above, this table records how.
 
 | Topic | Concept above | As built |
 | --- | --- | --- |
@@ -472,6 +472,8 @@ The database, audit log, local login with TOTP, the protected web shell, invitat
 | Invitations and reset | Admin invites by e-mail; users reset forgotten passwords themselves | Table core.action\_token (SHA-256 of the link token, purpose invite or password\_reset, single use). Invitation links last 7 days, reset links 1 hour; a new link replaces the open one. Both open /konto/\<token>. Setting the password activates invited users and ends all sessions. "Forgot password" always answers the same, whether or not the address exists |
 | E-mail | SMTP, templates per tenant and language; delivery through the outbox | SMTP from tenant.json, sent right after the commit; a failure is shown to the admin (mail\_sent false) and never rolls back the change. Passwords are referenced as env:VARIABLE. German plain-text templates in code for now; outbox, retries and tenant templates follow with the worker |
 | Granting roles | Admin assigns roles | Only roles whose permissions the admin holds can be granted. The last active admin cannot be deactivated or lose the admin role, and nobody can deactivate themselves. Deactivating ends all sessions; an MFA reset ends them and forces a new enrolment. Custom roles and step-up 2FA for role changes are still open |
+| Personal settings | user\_pref table; GET /me/preferences; MCP resource heinzel://me/preferences | Stored in app\_user.preferences (JSON, key localization). GET/PUT /api/v1/me/preferences returns own values, tenant defaults, locks and options; a locked setting is refused. The shell carries the effective values, and the web formats every date and number through one formatter. Theme is stored per browser, not per user. The MCP resource follows with the MCP gateway |
+| Audit viewer | Admins export per user for information requests | Filters for person, area (platform or module, by action prefix), channel, period and free text; paging by event id. CSV export with the same filters, itself recorded as audit.exported. The chain check runs on page load at most every 10 minutes per tenant; a scheduled check follows with the worker |
 
 The reverse proxy must keep the `Host` header and set `X-Forwarded-For`: the API resolves the tenant from the host and logs the client address from that header.
 

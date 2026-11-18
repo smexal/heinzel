@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from heinzel_api import localization
 from heinzel_api.deps import OptionalPrincipalDep, tenant_config
 from heinzel_api.manifests import Manifest
 from heinzel_api.tenants import TenantConfig
@@ -58,6 +59,8 @@ class ShellUser(BaseModel):
     display_name: str
     email: str
     initials: str
+    # Effective language and regional settings, for formatting in the client
+    localization: dict[str, str]
 
 
 class Shell(BaseModel):
@@ -196,7 +199,12 @@ def get_shell(
 ) -> Shell:
     if p is None or not p.mfa_passed:
         return build_shell(tenant, request.app.state.manifests, None)
-    user = ShellUser(display_name=p.display_name, email=p.email, initials=_initials(p.display_name))
+    user = ShellUser(
+        display_name=p.display_name,
+        email=p.email,
+        initials=_initials(p.display_name),
+        localization=localization.effective(tenant, p.preferences),
+    )
     return build_shell(tenant, request.app.state.manifests, p.permissions, user)
 
 

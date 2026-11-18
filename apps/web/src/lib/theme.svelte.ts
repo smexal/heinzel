@@ -2,14 +2,21 @@
 
 const KEY = 'heinzel.theme';
 
-export const theme = $state({ dark: false });
+export type ThemePref = 'light' | 'dark' | 'system';
 
-function apply(isDark: boolean) {
-	theme.dark = isDark;
-	document.documentElement.dataset.theme = isDark ? 'dark' : 'light';
+export const theme = $state({ dark: false, pref: 'system' as ThemePref });
+
+let media: MediaQueryList | null = null;
+
+function apply() {
+	const dark = theme.pref === 'dark' || (theme.pref === 'system' && (media?.matches ?? false));
+	theme.dark = dark;
+	document.documentElement.dataset.theme = dark ? 'dark' : 'light';
 }
 
 export function initTheme(tenantDefault: string) {
+	media = window.matchMedia('(prefers-color-scheme: dark)');
+	media.addEventListener('change', apply);
 	let stored: string | null = null;
 	try {
 		stored = localStorage.getItem(KEY);
@@ -17,17 +24,21 @@ export function initTheme(tenantDefault: string) {
 		/* storage may be unavailable */
 	}
 	const pref = stored ?? tenantDefault;
-	apply(
-		pref === 'dark' ||
-			(pref === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
-	);
+	theme.pref = pref === 'dark' || pref === 'light' ? pref : 'system';
+	apply();
 }
 
-export function toggleTheme() {
-	apply(!theme.dark);
+export function setTheme(pref: ThemePref) {
+	theme.pref = pref;
+	apply();
 	try {
-		localStorage.setItem(KEY, theme.dark ? 'dark' : 'light');
+		localStorage.setItem(KEY, pref);
 	} catch {
 		/* ignore */
 	}
+}
+
+/** Sidebar switch: flips between light and dark explicitly. */
+export function toggleTheme() {
+	setTheme(theme.dark ? 'light' : 'dark');
 }

@@ -68,12 +68,14 @@
 			<Icon name="moon" />{theme.dark ? 'Hellmodus' : 'Dunkelmodus'}
 		</button>
 		{#if user}
-			<div class="me">
-				<span class="avatar" aria-hidden="true">{user.initials}</span>
-				<span class="who">
-					<strong>{user.display_name}</strong>
-					<small>{user.email}</small>
-				</span>
+			<div class="me" class:on={page.url.pathname.startsWith('/profil')}>
+				<a class="profile" href="/profil" title="Mein Profil">
+					<span class="avatar" aria-hidden="true">{user.initials}</span>
+					<span class="who">
+						<strong>{user.display_name}</strong>
+						<small>{user.email}</small>
+					</span>
+				</a>
 				<button class="out" type="button" onclick={logout} title="Abmelden" aria-label="Abmelden">
 					<Icon name="log-out" size={18} />
 				</button>
@@ -235,6 +237,24 @@
 		border: 1px solid var(--line);
 		border-radius: 12px;
 		background: var(--surface);
+	}
+	.me.on {
+		background: var(--primary-tint);
+		border-color: transparent;
+	}
+	.profile {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		flex: 1;
+		min-width: 0;
+		color: inherit;
+		text-decoration: none;
+		border-radius: 8px;
+	}
+	.profile:focus-visible {
+		outline: 2px solid var(--primary);
+		outline-offset: 2px;
 	}
 	.avatar {
 		display: grid;

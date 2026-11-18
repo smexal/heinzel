@@ -55,7 +55,7 @@
 		code = '';
 		if (n === 'done') {
 			await invalidateAll();
-			await goto(safeNext(page.url.searchParams.get('next')), { replaceState: true });
+			await goto(safeNext(page.url.searchParams.get('next')), { replace: true });
 			return;
 		}
 		step = n;

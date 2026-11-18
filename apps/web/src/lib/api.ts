@@ -10,6 +10,10 @@ export class ApiError extends Error {
 	}
 }
 
+export async function get<T>(path: string): Promise<T> {
+	return send<T>('GET', path);
+}
+
 export function post<T>(path: string, body?: unknown): Promise<T> {
 	return send<T>('POST', path, body);
 }

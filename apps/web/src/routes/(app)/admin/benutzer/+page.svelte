@@ -2,11 +2,12 @@
 	import { invalidateAll } from '$app/navigation';
 	import { ApiError, post, put } from '#lib/api.ts';
 	import Icon from '#lib/components/Icon.svelte';
-	import { initials, relativeDay } from '#lib/format.ts';
+	import { formatter, initials } from '#lib/format.ts';
 	import type { AdminUser } from './+page.server.ts';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
+	const fmt = $derived(formatter(data.shell.user?.localization));
 
 	const roleName = $derived(new Map(data.roles.map((r) => [r.key, r.name])));
 	const invitedCount = $derived(data.users.filter((u) => u.status === 'invited').length);
@@ -337,8 +338,8 @@
 							<td><span class="chip {STATUS[u.status].tone}">{STATUS[u.status].label}</span></td>
 							<td class="when">
 								{u.status === 'invited' && u.invite_expires_at
-									? `Einladung bis ${relativeDay(u.invite_expires_at)}`
-									: relativeDay(u.last_login_at)}
+									? `Einladung bis ${fmt.relative(u.invite_expires_at)}`
+									: fmt.relative(u.last_login_at)}
 							</td>
 							<td class="actions">
 								<div class="menu-wrap">

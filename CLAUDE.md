@@ -105,7 +105,10 @@ Done:
 - [x] Rate limits per IP in Valkey (login, TOTP, forgot password, token links); wrong TOTP codes count toward lockout
 - [x] Admin: Benutzer & Rollen (list, filter, invite, resend, roles, deactivate/activate, 2FA reset; read-only permission matrix)
 
+- [x] Audit-Log viewer: filters in the URL (person, area, channel, period, text), day groups, details with hash, "Ältere laden", CSV export (audited), chain check shown (cached 10 min)
+- [x] Mein Profil: Sprache & Region (tenant defaults and locks, preview), Darstellung (light/dark/system, per browser), Sicherheit (change password, 2FA status)
+- [x] Formatting: `#lib/format.ts` `formatter(shell.user.localization)`; never format dates or numbers elsewhere
+
 Next, in this order:
-- [ ] Admin console, rest: Audit-Log viewer, custom roles (create/edit; step-up 2FA for role changes as in the design), Module, Einstellungen (Branding, Sprache & Region, Navigation, Anmeldung, E-Mail)
-- [ ] Mein Profil: Sprache & Region with tenant defaults and locks, change password (API exists)
+- [ ] Admin console, rest: custom roles (create/edit; step-up 2FA for role changes as in the design), Module, Einstellungen (Branding, Sprache & Region, Navigation, Anmeldung, E-Mail)
 - [ ] Then Phase 2 engines (inbox, search, files), then the first module: Aufgaben

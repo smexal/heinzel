@@ -40,6 +40,7 @@ class Principal:
     mfa_enabled: bool
     roles: list[str] = field(default_factory=list)
     permissions: frozenset[str] = frozenset()
+    preferences: dict = field(default_factory=dict)
 
     def can(self, permission: str) -> bool:
         return permission in self.permissions
@@ -135,6 +136,7 @@ def optional_principal(
             mfa_enabled=user.mfa_enabled,
             roles=rbac.user_role_keys(s, user.id),
             permissions=frozenset(perms),
+            preferences=dict(user.preferences),
         )
 
 

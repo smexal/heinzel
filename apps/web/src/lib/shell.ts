@@ -1,3 +1,5 @@
+import type { Localization } from '#lib/format.ts';
+
 // Types for GET /api/v1/shell (see apps/api/src/heinzel_api/routes/shell.py)
 
 export type NavItem = {
@@ -25,6 +27,7 @@ export type ShellUser = {
 	display_name: string;
 	email: string;
 	initials: string;
+	localization: Localization;
 };
 
 export type Shell = {
