@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -24,7 +25,9 @@ class Settings(BaseSettings):
     app_db_password: str = "heinzel_app"
     # Encrypts secrets at rest (TOTP seeds). Must be set outside dev.
     secret_key: str = "dev-only-insecure-secret-key-change-me"
-    # Files: local directory in dev (S3-compatible storage follows), upload limit, virus scan.
+    # Files: storage backend (only "local" for now: a directory on this machine, a Docker
+    # volume in the stack), upload limit, virus scan. See heinzel_api.files for moving files.
+    storage: Literal["local"] = "local"
     files_dir: Path = REPO_ROOT / "var" / "files"
     upload_max_mb: int = 15
     # ClamAV daemon (clamd). Unset: uploads are stored with scan_status "skipped" (dev only).

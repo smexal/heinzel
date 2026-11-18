@@ -4,23 +4,33 @@ migrate                     apply database migrations (as the schema owner)
 seed-tenants                register tenants/<slug> folders in the database, create system roles
 create-admin                create a user with the admin role
 verify-audit                check the audit hash chain of a tenant
+reindex-search              rebuild the search index of the core (people) for all tenants
+files verify                check that every stored file exists and matches its checksum
+files copy --to DIR         copy all files into another directory (moving storage)
+demo-inbox                  example items for a user's Mein Eingang
+
+Every command except migrate refuses to run while migrations are pending.
 """
 
 import argparse
 import getpass
 import hashlib
 import sys
+import uuid
 from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
+from alembic.runtime.migration import MigrationContext
+from alembic.script import ScriptDirectory
 from sqlalchemy import select
 
-from heinzel_api import audit, identity, rbac
+from heinzel_api import audit, identity, rbac, search
 from heinzel_api.config import Settings, get_settings
-from heinzel_api.db import make_sessionmaker, tenant_session
+from heinzel_api.db import get_engine, make_sessionmaker, tenant_session
+from heinzel_api.files import LocalStorage, Storage, make_storage
 from heinzel_api.manifests import load_manifests
-from heinzel_api.models import Tenant, TenantAsset, TenantSettings
+from heinzel_api.models import Attachment, Tenant, TenantAsset, TenantSettings
 from heinzel_api.tenants import TenantConfig, load_tenants
 
 API_DIR = Path(__file__).resolve().parents[2]
@@ -33,6 +43,77 @@ def run_migrations(url: str, revision: str = "head", down: bool = False) -> None
         command.downgrade(cfg, revision)
     else:
         command.upgrade(cfg, revision)
+
+
+def pending_migrations(url: str) -> tuple[str | None, str | None]:
+    """(current, head) when the database is behind the code, else (None, None)."""
+    script = ScriptDirectory.from_config(Config(str(API_DIR / "alembic.ini")))
+    head = script.get_current_head()
+    with get_engine(url).connect() as conn:
+        current = MigrationContext.configure(
+            conn, opts={"version_table_schema": "core"}
+        ).get_current_revision()
+    return (current, head) if current != head else (None, None)
+
+
+def tenant_ids(settings: Settings) -> list[tuple[str, uuid.UUID]]:
+    factory = make_sessionmaker(settings.migration_database_url)
+    with factory() as s:
+        return [
+            (r.slug, r.id) for r in s.execute(select(Tenant.slug, Tenant.id).order_by(Tenant.slug))
+        ]
+
+
+def verify_files(settings: Settings, storage: Storage) -> dict:
+    """Every live attachment must exist in storage with its recorded checksum. Files in
+    storage that no attachment references are reported as orphans (not deleted)."""
+    factory = make_sessionmaker(settings.migration_database_url)
+    report: dict = {"ok": 0, "missing": [], "corrupt": [], "orphans": []}
+    known: set[str] = set()
+    for _slug, tid in tenant_ids(settings):
+        with tenant_session(factory, tid) as s:
+            rows = s.execute(
+                select(
+                    Attachment.id, Attachment.storage_key, Attachment.sha256, Attachment.deleted_at
+                )
+            ).all()
+        for att_id, key, sha, deleted in rows:
+            known.add(key)
+            if deleted is not None:
+                continue
+            if not storage.exists(key):
+                report["missing"].append(str(att_id))
+            elif hashlib.sha256(storage.get(key)).hexdigest() != sha:
+                report["corrupt"].append(str(att_id))
+            else:
+                report["ok"] += 1
+    report["orphans"] = [k for k in storage.iter_keys() if k not in known]
+    return report
+
+
+def copy_files(settings: Settings, source: Storage, target: Storage) -> dict:
+    """Copy every live file to another storage, verifying checksums. Idempotent: files that
+    are already there with the right checksum are skipped, so an interrupted run can resume."""
+    factory = make_sessionmaker(settings.migration_database_url)
+    counts = {"copied": 0, "skipped": 0, "failed": []}
+    for _slug, tid in tenant_ids(settings):
+        with tenant_session(factory, tid) as s:
+            rows = s.execute(
+                select(Attachment.id, Attachment.storage_key, Attachment.sha256).where(
+                    Attachment.deleted_at.is_(None)
+                )
+            ).all()
+        for att_id, key, sha in rows:
+            if target.exists(key) and hashlib.sha256(target.get(key)).hexdigest() == sha:
+                counts["skipped"] += 1
+                continue
+            data = source.get(key) if source.exists(key) else None
+            if data is None or hashlib.sha256(data).hexdigest() != sha:
+                counts["failed"].append(str(att_id))
+                continue
+            target.put(key, data)
+            counts["copied"] += 1
+    return counts
 
 
 ASSET_TYPES = {".svg": "image/svg+xml", ".png": "image/png", ".webp": "image/webp"}
@@ -84,6 +165,7 @@ def seed_tenants(settings: Settings, reset_config: bool = False) -> list[str]:
                 existing.data = data
                 existing.sha256 = hashlib.sha256(data).hexdigest()
             rbac.ensure_system_roles(s, tenant_id, manifests)
+            search.reindex_core(s, tenant_id)
             if created:
                 audit.record(s, tenant_id, "tenant.registered", channel="cli")
             elif reset_config and current is not None:
@@ -205,9 +287,24 @@ def main(argv: list[str] | None = None) -> int:
     di = sub.add_parser("demo-inbox", help="put example items into a user's Mein Eingang")
     di.add_argument("--tenant", required=True)
     di.add_argument("--email", required=True)
+    sub.add_parser("reindex-search", help="rebuild the core's search index (people)")
+    fl = sub.add_parser("files", help="check or move stored files")
+    fsub = fl.add_subparsers(dest="files_cmd", required=True)
+    fsub.add_parser("verify", help="every file present and matching its checksum")
+    fc = fsub.add_parser("copy", help="copy all files into another directory")
+    fc.add_argument("--to", required=True, type=Path, help="target directory")
     args = parser.parse_args(argv)
 
     settings = get_settings()
+    if args.cmd != "migrate":
+        current, head = pending_migrations(settings.migration_database_url)
+        if head is not None:
+            print(
+                f"Die Datenbank ist nicht aktuell (Stand {current or 'leer'}, benötigt {head}).\n"
+                "Zuerst ausführen: uv run heinzel migrate",
+                file=sys.stderr,
+            )
+            return 3
     if args.cmd == "migrate":
         run_migrations(settings.migration_database_url, args.revision)
     elif args.cmd == "seed-tenants":
@@ -227,6 +324,32 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "demo-inbox":
         n = demo_inbox(settings, args.tenant, args.email)
         print(f"✓ {n} Beispiel-Einträge für {args.email}")
+    elif args.cmd == "reindex-search":
+        factory = make_sessionmaker(settings.migration_database_url)
+        for slug, tid in tenant_ids(settings):
+            with tenant_session(factory, tid) as s:
+                n = search.reindex_core(s, tid)
+            print(f"✓ {slug}: {n} Personen")
+    elif args.cmd == "files" and args.files_cmd == "verify":
+        r = verify_files(settings, make_storage(settings))
+        print(f"✓ {r['ok']} Dateien in Ordnung")
+        problems = (("fehlen", "missing"), ("beschädigt", "corrupt"), ("verwaist", "orphans"))
+        for label, key in problems:
+            if r[key]:
+                print(f"✗ {len(r[key])} {label}: " + ", ".join(r[key][:20]))
+        return 2 if r["missing"] or r["corrupt"] else 0
+    elif args.cmd == "files" and args.files_cmd == "copy":
+        target = args.to.resolve()
+        if target == settings.files_dir.resolve():
+            print("Ziel ist der aktuelle Speicherort", file=sys.stderr)
+            return 1
+        c = copy_files(settings, make_storage(settings), LocalStorage(target))
+        print(f"✓ {c['copied']} kopiert, {c['skipped']} schon vorhanden")
+        if c["failed"]:
+            failed = ", ".join(c["failed"][:20])
+            print(f"✗ {len(c['failed'])} nicht lesbar oder beschädigt: {failed}")
+            return 2
+        print(f"Danach HEINZEL_FILES_DIR={target} setzen und die API neu starten.")
     elif args.cmd == "verify-audit":
         factory = make_sessionmaker(settings.migration_database_url)
         with factory() as s:

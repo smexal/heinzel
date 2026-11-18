@@ -79,3 +79,34 @@ def test_link_and_module_access_check(api, make_user, app_factory):
     finally:
         files._access.pop(("aufgaben", "task"), None)
     assert other.get(f"/api/v1/files/{att_id}").status_code == 404
+
+
+def test_verify_and_copy_for_moving_storage(api, make_user, seeded, tmp_path):
+    """heinzel files verify / files copy: the tools for moving files to another backend."""
+    from heinzel_api.cli import copy_files, verify_files
+
+    enrol(api, make_user())
+    att = _upload(api, JPEG).json()
+    storage = api.app.state.storage
+    key = next(k for k in storage.iter_keys() if k.endswith(att["id"]))
+    storage.put("stray/file", b"x")
+
+    report = verify_files(seeded, storage)
+    assert att["id"] not in report["missing"] + report["corrupt"]
+    assert "stray/file" in report["orphans"]
+
+    target = files.LocalStorage(tmp_path)
+    counts = copy_files(seeded, storage, target)
+    assert target.get(key) == JPEG and counts["copied"] >= 1
+    assert copy_files(seeded, storage, target)["skipped"] >= 1  # resumable
+
+    storage.put(key, JPEG + b"changed")
+    assert att["id"] in verify_files(seeded, storage)["corrupt"]
+
+
+def test_local_storage_rejects_escaping_keys(tmp_path):
+    store = files.LocalStorage(tmp_path / "files")
+    store.put("t/2026/11/a", b"1")
+    assert store.exists("t/2026/11/a") and list(store.iter_keys()) == ["t/2026/11/a"]
+    with pytest.raises(ValueError):
+        store.put("../outside", b"x")

@@ -1,7 +1,11 @@
 """Files service: uploads, storage, virus scan and access checks for attachments.
 
-Bytes live in a storage backend (local directory in dev; S3-compatible storage follows),
-metadata in core.attachment. A module uploads first (the file is "staged": no target yet,
+Bytes live in a storage backend, metadata in core.attachment. The only backend today is a
+local directory (HEINZEL_FILES_DIR; a Docker volume in the stack). Storage keys are
+backend-neutral (`<tenant>/<yyyy>/<mm>/<attachment id>`) and the database holds size and
+sha256 of every file, so the files can later be moved to another backend (a self-hosted or
+Swiss S3-compatible store, a NAS) with `heinzel files copy` and checked with
+`heinzel files verify`. A module uploads first (the file is "staged": no target yet,
 visible only to the uploader), then links it to its own object. Who may see a linked file
 is decided by the module through a registered access check; recipients of an inbox item
 that shows the file may see it too.
@@ -11,15 +15,18 @@ import hashlib
 import socket
 import struct
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from sqlalchemy import any_, select
 from sqlalchemy.orm import Session
 
 from heinzel_api.models import Attachment, InboxItem
+
+if TYPE_CHECKING:
+    from heinzel_api.config import Settings
 
 # --- content types (sniffed from the bytes, never taken from the client) ----------------------
 
@@ -63,9 +70,13 @@ def clean_filename(name: str | None, content_type: str) -> str:
 
 
 class Storage(Protocol):
+    """A key/value store for file bytes. Keys look like `<tenant>/<yyyy>/<mm>/<uuid>`."""
+
     def put(self, key: str, data: bytes) -> None: ...
     def get(self, key: str) -> bytes: ...
     def delete(self, key: str) -> None: ...
+    def exists(self, key: str) -> bool: ...
+    def iter_keys(self) -> Iterator[str]: ...
 
 
 class LocalStorage:
@@ -93,6 +104,16 @@ class LocalStorage:
     def delete(self, key: str) -> None:
         self._path(key).unlink(missing_ok=True)
 
+    def exists(self, key: str) -> bool:
+        return self._path(key).is_file()
+
+    def iter_keys(self) -> Iterator[str]:
+        if not self.root.is_dir():
+            return
+        for path in sorted(self.root.rglob("*")):
+            if path.is_file():
+                yield path.relative_to(self.root).as_posix()
+
 
 class MemoryStorage:
     def __init__(self) -> None:
@@ -106,6 +127,19 @@ class MemoryStorage:
 
     def delete(self, key: str) -> None:
         self.blobs.pop(key, None)
+
+    def exists(self, key: str) -> bool:
+        return key in self.blobs
+
+    def iter_keys(self) -> Iterator[str]:
+        yield from sorted(self.blobs)
+
+
+def make_storage(settings: "Settings") -> Storage:
+    """The configured backend. Add new backends here; keys and metadata stay the same."""
+    if settings.storage == "local":
+        return LocalStorage(settings.files_dir)
+    raise ValueError(f"unknown storage backend {settings.storage!r}")
 
 
 # --- virus scan -------------------------------------------------------------------------------

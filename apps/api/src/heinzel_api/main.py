@@ -5,9 +5,10 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from heinzel_api import __version__
+from heinzel_api import search as search_index
 from heinzel_api.config import Settings, get_settings
 from heinzel_api.db import make_sessionmaker
-from heinzel_api.files import ClamdScanner, LocalStorage, NoScanner, Scanner, Storage
+from heinzel_api.files import ClamdScanner, NoScanner, Scanner, Storage, make_storage
 from heinzel_api.mail import Mailer, SmtpMailer
 from heinzel_api.manifests import load_manifests
 from heinzel_api.ratelimit import RateLimiter, ValkeyRateLimiter
@@ -22,6 +23,7 @@ from heinzel_api.routes import (
     health,
     inbox,
     me,
+    search,
     shell,
 )
 from heinzel_api.tenants import TenantRegistry
@@ -43,12 +45,13 @@ def create_app(
     async def lifespan(app: FastAPI):
         app.state.settings = settings
         app.state.manifests = load_manifests(settings.modules_dir)
+        search_index.providers_from_manifests(app.state.manifests)
         app.state.audit_chain = {}
         app.state.db = make_sessionmaker(settings.database_url)
         app.state.registry = TenantRegistry(app.state.db)
         app.state.mailer = mailer or SmtpMailer(settings.smtp_host_override, settings.secret_key)
         app.state.ratelimiter = ratelimiter or ValkeyRateLimiter(settings.valkey_url)
-        app.state.storage = storage or LocalStorage(settings.files_dir)
+        app.state.storage = storage or make_storage(settings)
         app.state.scanner = scanner or (
             ClamdScanner(settings.clamd_host, settings.clamd_port)
             if settings.clamd_host
@@ -80,6 +83,7 @@ def create_app(
     app.include_router(admin_modules.router)
     app.include_router(files.router)
     app.include_router(inbox.router)
+    app.include_router(search.router)
     return app
 
 

@@ -76,6 +76,11 @@ pnpm check:web && pnpm build:web
 - Tenant configuration lives in the database. `heinzel seed-tenants` creates settings and assets only for new
   tenants; `--reset-config` overwrites them from `tenants/<slug>/` (discards portal changes). Domains are
   operator-managed (seed), not editable by tenant admins.
+- Search: modules call `search.index()`/`search.remove()` in the same transaction as the change, set
+  `permission` on each document and register `can_view` for row-level checks; never index sensitive fields.
+  Manifest: `contributes.search_providers: [{type, label, icon}]`. The MCP tool `search` must use `search.run`.
+- Files stay on the local machine (Docker volume / `var/files`) until a move is decided; target would be a
+  self-hosted or Swiss S3-compatible store, never AWS. Back the files directory up with the database.
 - Modules: deliver inbox items with `ref_type/ref_id` (re-delivery updates, `resolve()` closes); upload files with
   `?module=<id>`, then `files.link()` them to their object and register an access check for that target type.
 - Module settings conventions: `quick_action_enabled`, `widget_enabled`, `search_enabled` switch the module's
@@ -138,7 +143,13 @@ Phase 1 (core platform and admin console) is complete.
 - [x] Inbox: `heinzel_api.inbox.deliver/resolve/register_action`, Mein Eingang page, sidebar badge, Übersicht summary;
       core notices for accepted invitations and role changes; `heinzel demo-inbox` for sample items
 
+- [x] File storage stays local (`HEINZEL_STORAGE=local`), prepared for a move: backend-neutral keys,
+      `heinzel files verify` / `heinzel files copy --to`; no AWS. Another backend = one class in `files.py`
+- [x] Search: `core.search_document` (unaccent, simple prefix + German stemming), `heinzel_api.search`
+      (`index/remove/register_provider/run`), `GET /api/v1/search`, people auto-indexed, pages matched live;
+      Ctrl K dialog (filter chips, keyboard, highlights); `heinzel reindex-search`
+- [x] CLI refuses to run (except `migrate`) while migrations are pending
+
 Next, in this order:
-- [ ] Phase 2 engines, rest: search (search_document + providers), S3 storage backend
 - [ ] First module: Aufgaben (spec in docs/concept/modules/aufgaben.md)
 - [ ] MCP gateway (tools from manifests, respects permissions and `mcp_disabled`)

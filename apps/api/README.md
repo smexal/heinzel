@@ -9,10 +9,15 @@ uv run heinzel seed-tenants            # register tenants/<slug> (settings only 
 uv run heinzel seed-tenants --reset-config   # overwrite settings and logos from tenants/<slug>
 uv run heinzel create-admin --tenant schmelzi --email you@example.org --name "Vorname Name"
 uv run heinzel demo-inbox --tenant schmelzi --email you@example.org   # sample items in Mein Eingang
+uv run heinzel reindex-search          # rebuild the core's search index (seed-tenants does this too)
+uv run heinzel files verify            # every stored file present and matching its checksum
+uv run heinzel files copy --to D:\heinzel-files   # copy all files elsewhere (moving storage)
 uv run uvicorn heinzel_api.main:app --reload --port 8000
 uv run pytest                          # needs Postgres (docker compose); creates heinzel_test
 uv run ruff check . && uv run ruff format --check .
 ```
+
+Every command except `migrate` stops with a hint when migrations are pending.
 
 OpenAPI UI: http://localhost:8000/docs
 
@@ -63,4 +68,34 @@ policies show and accept only that tenant's rows. Migrations of new tenant table
 | `GET /api/v1/inbox?view=open\|notices\|done&source=` | Mein Eingang with counts and sources |
 | `POST /api/v1/inbox/{id}/read\|unread\|done\|reopen`, `/read-all` | item state |
 | `POST /api/v1/inbox/{id}/actions/{key}` | action button, handled by the source module |
+| `GET /api/v1/search?q=&group=` | global search: pages, people (user admins), module entities; permission-filtered twice |
 | `GET /api/v1/admin/roles` | roles with expanded permissions and the permission catalogue |
+
+## Search
+
+`heinzel_api.search` keeps one index (`core.search_document`, tsvector with unaccent; simple
+prefix matching plus German stemming). Modules call `search.index(...)` / `search.remove(...)`
+in the same transaction as the change and may register a `can_view` check with
+`search.register_provider(module, type, can_view=...)`; label and icon come from the manifest
+(`contributes.search_providers: [{type, label, icon}]`). A query only covers active modules
+(not switched off with `search_enabled: false`) and documents whose `permission` the user holds,
+then runs each provider's `can_view`. People are indexed automatically when a user's name,
+e-mail or status changes. Pages (navigation, admin pages, settings and profile tabs) are matched
+live. Never index sensitive fields.
+
+## File storage
+
+Files stay on this machine for now: `HEINZEL_STORAGE=local` (the only backend) with
+`HEINZEL_FILES_DIR` (dev: `var/files`; Docker stack: the `files` volume, `/data/files`). Back that
+directory up together with the database.
+
+Prepared for a move: storage keys are backend-neutral (`<tenant>/<yyyy>/<mm>/<attachment id>`) and
+every file's size and SHA-256 are in `core.attachment`. To move to another disk or a NAS:
+
+1. `uv run heinzel files copy --to <new dir>` (resumable, verifies checksums)
+2. set `HEINZEL_FILES_DIR=<new dir>`, restart the API
+3. `uv run heinzel files verify`
+
+A different backend (e.g. a self-hosted or Swiss S3-compatible store, not AWS) is one class
+implementing `put/get/delete/exists/iter_keys` in `heinzel_api.files`, a new value for
+`HEINZEL_STORAGE`, and the same copy/verify steps.

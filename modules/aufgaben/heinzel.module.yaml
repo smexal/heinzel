@@ -26,7 +26,8 @@ contributes:
     - { key: aufgabe-erfassen, label: { de: Aufgabe erfassen }, path: "/aufgaben?neu=1", permission: aufgaben.use }
   dashboard_widgets: [heute-faellig]
   inbox_items: [task-assigned, task-completed]
-  search_providers: [tasks]
+  search_providers:
+    - { type: task, label: { de: Aufgaben }, icon: check-square }
 
 events:
   publishes: [aufgaben.task.assigned, aufgaben.task.completed]

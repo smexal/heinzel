@@ -19,7 +19,18 @@
 	let tab = $state<'users' | 'roles'>(
 		untrack(() => (page.url.searchParams.get('tab') === 'rollen' ? 'roles' : 'users'))
 	);
-	let query = $state('');
+	let query = $state(untrack(() => page.url.searchParams.get('q') ?? ''));
+	$effect(() => {
+		const q = page.url.searchParams.get('q');
+		const t = page.url.searchParams.get('tab');
+		untrack(() => {
+			if (q !== null) {
+				query = q;
+				tab = 'users';
+			}
+			if (t === 'rollen') tab = 'roles';
+		});
+	});
 	let roleFilter = $state('');
 	let statusFilter = $state('');
 

@@ -25,6 +25,10 @@
 			return (TABS.find(([k]) => k === t)?.[0] ?? 'general') as Tab;
 		})
 	);
+	$effect(() => {
+		const t = TABS.find(([k]) => k === page.url.searchParams.get('tab'))?.[0];
+		if (t) untrack(() => (tab = t));
+	});
 
 	const s = $derived(data.settings);
 	const opt = $derived(data.settings.options);

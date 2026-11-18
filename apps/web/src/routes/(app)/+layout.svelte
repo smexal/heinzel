@@ -4,6 +4,7 @@
 	import { post } from '#lib/api.ts';
 	import Icon from '#lib/components/Icon.svelte';
 	import Leprechaun from '#lib/components/Leprechaun.svelte';
+	import SearchDialog from '#lib/components/SearchDialog.svelte';
 	import StepUpDialog from '#lib/components/StepUpDialog.svelte';
 	import { theme, toggleTheme } from '#lib/theme.svelte.ts';
 	import type { LayoutProps } from './$types';
@@ -12,6 +13,11 @@
 	const shell = $derived(data.shell);
 	const b = $derived(shell.branding);
 	const user = $derived(shell.user);
+	let searchOpen = $state(false);
+	let mac = $state(false);
+	$effect(() => {
+		mac = /Mac|iPhone|iPad/.test(navigator.platform);
+	});
 
 	const isActive = (path: string) =>
 		path === '/' ? page.url.pathname === '/' : page.url.pathname.startsWith(path);
@@ -33,10 +39,10 @@
 			{#if b.logo_dark}<img class="logo-dark" src={b.logo_dark} alt={b.display_name} />{/if}
 		</a>
 
-		<button class="search" type="button" aria-disabled="true" title="Suche folgt">
+		<button class="search" type="button" onclick={() => (searchOpen = true)} aria-haspopup="dialog">
 			<Icon name="search" size={18} />
 			<span>Suchen</span>
-			<kbd>Ctrl K</kbd>
+			<kbd>{mac ? '⌘ K' : 'Ctrl K'}</kbd>
 		</button>
 
 		<nav aria-label="Hauptnavigation">
@@ -93,6 +99,7 @@
 	<main class="main">
 		{@render children()}
 	</main>
+	<SearchDialog bind:open={searchOpen} />
 	<StepUpDialog mfa={user?.mfa_enabled ?? false} />
 </div>
 

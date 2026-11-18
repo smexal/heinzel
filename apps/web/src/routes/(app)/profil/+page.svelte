@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { invalidateAll } from '$app/navigation';
+	import { page } from '$app/state';
 	import { ApiError, post, put } from '#lib/api.ts';
 	import { formatter, initials, type Localization } from '#lib/format.ts';
 	import { setTheme, theme, type ThemePref } from '#lib/theme.svelte.ts';
@@ -10,7 +11,18 @@
 	let { data }: PageProps = $props();
 
 	type Tab = 'region' | 'appearance' | 'security';
-	let tab = $state<Tab>('region');
+	const TAB_KEYS: Tab[] = ['region', 'appearance', 'security'];
+	let tab = $state<Tab>(
+		untrack(() => {
+			const t = page.url.searchParams.get('tab') as Tab;
+			return TAB_KEYS.includes(t) ? t : 'region';
+		})
+	);
+	// Links into a tab (e.g. from the search) while the page is already open
+	$effect(() => {
+		const t = page.url.searchParams.get('tab') as Tab;
+		if (TAB_KEYS.includes(t)) untrack(() => (tab = t));
+	});
 
 	const ROLE_NAMES: Record<string, string> = { admin: 'Administration', staff: 'Mitarbeitende' };
 
