@@ -60,7 +60,16 @@ if (!existsSync(join(root, 'node_modules'))) run('pnpm install');
 const children = [];
 
 function start(name, cmd, cwd) {
-	const child = spawn(cmd, { cwd, shell: true, stdio: ['ignore', 'pipe', 'pipe'] });
+	// Each child gets its own process group (Windows: own hidden console). Otherwise uvicorn's
+	// reload on Windows sends CTRL_C_EVENT to the shared console and kills the web server too
+	// ("Terminate batch job (Y/N)?"). Ctrl+C in this terminal is handled by stop() below.
+	const child = spawn(cmd, {
+		cwd,
+		shell: true,
+		stdio: ['ignore', 'pipe', 'pipe'],
+		detached: isWin,
+		windowsHide: true
+	});
 	const prefix = `${colour[name]}[${name}]\x1b[0m `;
 	for (const stream of [child.stdout, child.stderr]) {
 		let buf = '';
@@ -94,7 +103,8 @@ function stop(code = 0) {
 process.on('SIGINT', () => stop(0));
 process.on('SIGTERM', () => stop(0));
 
-start('api', 'uv run uvicorn heinzel_api.main:app --reload --port 8000', api);
+// Watch only the source: the default (whole apps/api) includes .venv and reloads on uv sync.
+start('api', 'uv run uvicorn heinzel_api.main:app --reload --reload-dir src --port 8000', api);
 start('web', 'pnpm --filter web dev', root);
 say(
 	'web: http://localhost:5173 · API docs: http://localhost:8000/docs · mail: http://localhost:8025'
