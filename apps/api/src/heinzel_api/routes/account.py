@@ -6,7 +6,7 @@ The link in an e-mail opens /konto/<token> in the web app, which calls these end
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from heinzel_api import audit, identity, mail, ratelimit
+from heinzel_api import audit, identity, inbox, mail, ratelimit
 from heinzel_api.db import tenant_session
 from heinzel_api.deps import DbDep, PrincipalDep, TenantDep, client_ip, public_url, rate_limit
 from heinzel_api.models import User
@@ -92,6 +92,20 @@ def set_password(body: SetPasswordIn, request: Request, tenant: TenantDep, db: D
             if result is None:
                 raise HTTPException(status_code=404, detail="invalid_token")
             row, user = result
+            if row.purpose == "invite" and row.created_by:
+                inbox.deliver(
+                    s,
+                    tenant.id,
+                    [row.created_by],
+                    source=inbox.CORE,
+                    kind="notice",
+                    title=f"{user.display_name} hat die Einladung angenommen",
+                    context=user.email,
+                    link="/admin/benutzer",
+                    ref_type="user",
+                    ref_id=str(user.id),
+                    actor_user_id=user.id,
+                )
             audit.record(
                 s,
                 tenant.id,

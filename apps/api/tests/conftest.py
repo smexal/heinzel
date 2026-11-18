@@ -113,10 +113,23 @@ def seeded(migrated):
 @pytest.fixture
 def api(seeded):
     """App on the test database, talking to it as tenant schmelzi (host localhost)."""
+    from heinzel_api.files import MemoryStorage
     from heinzel_api.mail import MemoryMailer
     from heinzel_api.ratelimit import MemoryRateLimiter
 
-    app = create_app(seeded, mailer=MemoryMailer(), ratelimiter=MemoryRateLimiter())
+    class FakeScanner:
+        """Marks uploads containing EVIL as infected."""
+
+        def scan(self, data: bytes) -> str:
+            return "infected" if b"EVIL" in data else "clean"
+
+    app = create_app(
+        seeded,
+        mailer=MemoryMailer(),
+        ratelimiter=MemoryRateLimiter(),
+        storage=MemoryStorage(),
+        scanner=FakeScanner(),
+    )
     with TestClient(app, base_url="http://localhost") as c:
         yield c
 

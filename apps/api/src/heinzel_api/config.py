@@ -24,6 +24,12 @@ class Settings(BaseSettings):
     app_db_password: str = "heinzel_app"
     # Encrypts secrets at rest (TOTP seeds). Must be set outside dev.
     secret_key: str = "dev-only-insecure-secret-key-change-me"
+    # Files: local directory in dev (S3-compatible storage follows), upload limit, virus scan.
+    files_dir: Path = REPO_ROOT / "var" / "files"
+    upload_max_mb: int = 15
+    # ClamAV daemon (clamd). Unset: uploads are stored with scan_status "skipped" (dev only).
+    clamd_host: str | None = None
+    clamd_port: int = 3310
     # Dev only: send mail to this SMTP host instead of the one in tenant.json
     # (in the Docker stack Mailpit is "mailpit", not localhost).
     smtp_host_override: str | None = None
@@ -44,6 +50,8 @@ class Settings(BaseSettings):
         """Refuse to start outside dev with development defaults."""
         if not self.is_dev and self.secret_key.startswith("dev-only"):
             raise RuntimeError("HEINZEL_SECRET_KEY must be set outside dev")
+        if self.env == "prod" and not self.clamd_host:
+            raise RuntimeError("HEINZEL_CLAMD_HOST must be set in prod (virus scan for uploads)")
 
 
 @lru_cache

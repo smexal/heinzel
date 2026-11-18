@@ -18,7 +18,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from heinzel_api import audit, identity, mail, rbac
+from heinzel_api import audit, identity, inbox, mail, rbac
 from heinzel_api.db import tenant_session
 from heinzel_api.deps import (
     DbDep,
@@ -332,6 +332,25 @@ def set_user_roles(
                 rbac.assign_role(s, tenant.id, user.id, role.id)
             else:
                 rbac.unassign_role(s, user.id, all_roles[role.key].id)
+        added, removed = sorted(wanted - before), sorted(before - wanted)
+        if added or removed:
+            names = {r.key: r.name for r in all_roles.values()}
+            parts = []
+            if added:
+                parts.append("Neu: " + ", ".join(names.get(k, k) for k in added))
+            if removed:
+                parts.append("Entfernt: " + ", ".join(names.get(k, k) for k in removed))
+            inbox.deliver(
+                s,
+                tenant.id,
+                [user.id],
+                source=inbox.CORE,
+                kind="notice",
+                title="Deine Rollen wurden geändert",
+                context=". ".join(parts),
+                body="Was du im Portal siehst und tun kannst, hat sich damit geändert.",
+                actor_user_id=actor.user_id,
+            )
         audit.record(
             s,
             tenant.id,

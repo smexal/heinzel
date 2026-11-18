@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from heinzel_api import __version__
 from heinzel_api.config import Settings, get_settings
 from heinzel_api.db import make_sessionmaker
+from heinzel_api.files import ClamdScanner, LocalStorage, NoScanner, Scanner, Storage
 from heinzel_api.mail import Mailer, SmtpMailer
 from heinzel_api.manifests import load_manifests
 from heinzel_api.ratelimit import RateLimiter, ValkeyRateLimiter
@@ -17,7 +18,9 @@ from heinzel_api.routes import (
     admin_settings,
     admin_users,
     auth,
+    files,
     health,
+    inbox,
     me,
     shell,
 )
@@ -30,6 +33,8 @@ def create_app(
     settings: Settings | None = None,
     mailer: Mailer | None = None,
     ratelimiter: RateLimiter | None = None,
+    storage: Storage | None = None,
+    scanner: Scanner | None = None,
 ) -> FastAPI:
     settings = settings or get_settings()
     settings.check()
@@ -43,6 +48,12 @@ def create_app(
         app.state.registry = TenantRegistry(app.state.db)
         app.state.mailer = mailer or SmtpMailer(settings.smtp_host_override, settings.secret_key)
         app.state.ratelimiter = ratelimiter or ValkeyRateLimiter(settings.valkey_url)
+        app.state.storage = storage or LocalStorage(settings.files_dir)
+        app.state.scanner = scanner or (
+            ClamdScanner(settings.clamd_host, settings.clamd_port)
+            if settings.clamd_host
+            else NoScanner()
+        )
         yield
 
     app = FastAPI(title="Heinzel API", version=__version__, lifespan=lifespan)
@@ -67,6 +78,8 @@ def create_app(
     app.include_router(admin_audit.router)
     app.include_router(admin_settings.router)
     app.include_router(admin_modules.router)
+    app.include_router(files.router)
+    app.include_router(inbox.router)
     return app
 
 

@@ -257,6 +257,68 @@ class PermissionSeeded(Base):
     seeded_at: Mapped[datetime] = _created()
 
 
+class Attachment(Base):
+    """A stored file. Bytes live in the storage backend (heinzel_api.files)."""
+
+    __tablename__ = "attachment"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = _tenant_fk()
+    module: Mapped[str] = mapped_column(String(41), nullable=False)
+    target_type: Mapped[str | None] = mapped_column(String(60))
+    target_id: Mapped[str | None] = mapped_column(String(120))
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    storage_key: Mapped[str] = mapped_column(String(300), nullable=False)
+    scan_status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="pending")
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("app_user.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = _created()
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class InboxItem(Base):
+    """An entry in a user's Mein Eingang: a task to do or a notice to read."""
+
+    __tablename__ = "inbox_item"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = _tenant_fk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("app_user.id", ondelete="CASCADE"), nullable=False
+    )
+    source: Mapped[str] = mapped_column(String(41), nullable=False)
+    kind: Mapped[str] = mapped_column(String(10), nullable=False)
+    severity: Mapped[str | None] = mapped_column(String(10))
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    context: Mapped[str | None] = mapped_column(String(300))
+    body: Mapped[str | None] = mapped_column(Text)
+    reason: Mapped[str | None] = mapped_column(String(300))
+    facts: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    link: Mapped[str | None] = mapped_column(String(500))
+    actions: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    attachments: Mapped[list[uuid.UUID]] = mapped_column(
+        ARRAY(UUID(as_uuid=True)), nullable=False, server_default="{}"
+    )
+    ref_type: Mapped[str | None] = mapped_column(String(60))
+    ref_id: Mapped[str | None] = mapped_column(String(120))
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = _created()
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    done_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 TENANT_TABLES = [
     "app_user",
     "role",
@@ -268,4 +330,6 @@ TENANT_TABLES = [
     "permission_seeded",
     "tenant_settings",
     "tenant_asset",
+    "attachment",
+    "inbox_item",
 ]

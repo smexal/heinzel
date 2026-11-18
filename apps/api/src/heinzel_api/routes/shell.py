@@ -16,6 +16,7 @@ from heinzel_api.db import tenant_session
 from heinzel_api.deps import OptionalPrincipalDep, tenant_config
 from heinzel_api.manifests import Manifest
 from heinzel_api.models import TenantAsset
+from heinzel_api.routes.inbox import counts as inbox_counts
 from heinzel_api.tenants import TenantConfig
 
 router = APIRouter(prefix="/api/v1")
@@ -29,6 +30,7 @@ class NavItem(BaseModel):
     label: str
     path: str
     icon: str | None = None
+    badge: int | None = None  # e.g. unread items in Mein Eingang
     children: list["NavItem"] = []
 
 
@@ -218,7 +220,14 @@ def get_shell(
         mfa_enabled=p.mfa_enabled,
         localization=localization.effective(tenant, p.preferences),
     )
-    return build_shell(tenant, request.app.state.manifests, p.permissions, user)
+    shell = build_shell(tenant, request.app.state.manifests, p.permissions, user)
+    with tenant_session(request.app.state.db, p.tenant_id) as s:
+        unread = inbox_counts(s, p.user_id)["unread"]
+    for section in shell.navigation:
+        for item in section.items:
+            if item.key == "inbox":
+                item.badge = unread or None
+    return shell
 
 
 @router.get("/tenants/{slug}/assets/{name}")

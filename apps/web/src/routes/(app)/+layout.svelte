@@ -49,7 +49,10 @@
 						href={item.path}
 						aria-current={isActive(item.path) ? 'page' : undefined}
 					>
-						<Icon name={item.icon} />{item.label}
+						<Icon name={item.icon} /><span class="label">{item.label}</span>
+						{#if item.badge}<span class="badge" aria-label="{item.badge} ungelesen"
+								>{item.badge}</span
+							>{/if}
 					</a>
 					{#if item.children.length && isActive(item.path)}
 						<div class="sub">
@@ -229,6 +232,20 @@
 	}
 	.powered strong {
 		color: var(--ink-2);
+	}
+	.label {
+		flex: 1;
+	}
+	.badge {
+		min-width: 22px;
+		padding: 1px 8px;
+		border-radius: 999px;
+		background: var(--primary);
+		color: #fff;
+		font-size: 12px;
+		font-weight: 600;
+		text-align: center;
+		box-sizing: border-box;
 	}
 	.me {
 		display: flex;

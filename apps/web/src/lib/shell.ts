@@ -7,6 +7,7 @@ export type NavItem = {
 	label: string;
 	path: string;
 	icon: string | null;
+	badge?: number | null;
 	children: NavItem[];
 };
 

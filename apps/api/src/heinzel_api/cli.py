@@ -130,6 +130,61 @@ def create_admin(
         )
 
 
+def demo_inbox(settings: Settings, slug: str, email: str) -> int:
+    """Example items in a user's Mein Eingang, to try the page before modules deliver any."""
+    from datetime import UTC, datetime, timedelta
+
+    from heinzel_api import inbox
+
+    factory = make_sessionmaker(settings.migration_database_url)
+    with factory() as s:
+        tenant_id = s.scalar(select(Tenant.id).where(Tenant.slug == slug))
+    if tenant_id is None:
+        raise SystemExit(f"Unbekannter Mandant '{slug}'")
+    with tenant_session(factory, tenant_id) as s:
+        user = identity.find_user(s, email)
+        if user is None:
+            raise SystemExit(f"Unbekannter Benutzer {email}")
+        now = datetime.now(UTC)
+        items = [
+            dict(
+                source="aufgaben",
+                kind="task",
+                title="Zugewiesen: Protokoll GL-Sitzung verschicken",
+                context="Sekretariat · fällig heute",
+                body="Bitte das Protokoll der GL-Sitzung vom Montag an alle Teilnehmenden senden.",
+                reason="Die Aufgabe wurde dir zugewiesen.",
+                facts=[("Liste", "Sekretariat"), ("Fällig", "heute")],
+                link="/aufgaben",
+                due_at=now + timedelta(hours=6),
+                ref_type="demo",
+                ref_id="task-1",
+            ),
+            dict(
+                source="core",
+                kind="task",
+                title="Einladung von Nina Frei noch offen",
+                context="seit 3 Tagen",
+                body="Nina Frei hat die Einladung noch nicht angenommen.",
+                reason="Du hast die Einladung verschickt.",
+                link="/admin/benutzer",
+                ref_type="demo",
+                ref_id="task-2",
+            ),
+            dict(
+                source="core",
+                kind="notice",
+                title="Deine Rollen wurden geändert",
+                context="Neu: Mitarbeitende",
+                ref_type="demo",
+                ref_id="notice-1",
+            ),
+        ]
+        for item in items:
+            inbox.deliver(s, tenant_id, [user.id], **item)
+    return len(items)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="heinzel")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -147,6 +202,9 @@ def main(argv: list[str] | None = None) -> int:
     a.add_argument("--name", required=True)
     v = sub.add_parser("verify-audit", help="verify the audit hash chain")
     v.add_argument("--tenant", required=True)
+    di = sub.add_parser("demo-inbox", help="put example items into a user's Mein Eingang")
+    di.add_argument("--tenant", required=True)
+    di.add_argument("--email", required=True)
     args = parser.parse_args(argv)
 
     settings = get_settings()
@@ -166,6 +224,9 @@ def main(argv: list[str] | None = None) -> int:
             print(e, file=sys.stderr)
             return 1
         print(f"✓ {args.email} angelegt. Die Zwei-Faktor-Einrichtung folgt beim ersten Login.")
+    elif args.cmd == "demo-inbox":
+        n = demo_inbox(settings, args.tenant, args.email)
+        print(f"✓ {n} Beispiel-Einträge für {args.email}")
     elif args.cmd == "verify-audit":
         factory = make_sessionmaker(settings.migration_database_url)
         with factory() as s:
