@@ -1,0 +1,2 @@
+# Module backends follow the API's lint and format rules.
+extend = "../apps/api/pyproject.toml"

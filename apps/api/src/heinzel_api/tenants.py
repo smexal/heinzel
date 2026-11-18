@@ -100,6 +100,18 @@ def load_tenants(tenants_dir: Path) -> dict[str, TenantConfig]:
 # --- Runtime registry (database) ----------------------------------------------------------
 
 
+def config_in_session(session, tenant_id) -> "TenantConfig | None":
+    """The tenant's configuration, read inside a tenant-scoped transaction (for code that has
+    a session but not the registry, e.g. inbox action handlers)."""
+    row = session.execute(select(Tenant.slug, Tenant.domains).where(Tenant.id == tenant_id)).first()
+    settings = session.get(TenantSettings, tenant_id)
+    if row is None or settings is None:
+        return None
+    return TenantConfig.model_validate(
+        {**settings.config, "slug": row.slug, "domains": list(row.domains)}
+    )
+
+
 class TenantEntry:
     __slots__ = ("id", "config", "version")
 
@@ -166,6 +178,10 @@ class TenantRegistry:
             return None
         self._ensure()
         return self._by_domain.get(host.split(":")[0].lower())
+
+    def all(self) -> list[TenantEntry]:
+        self._ensure()
+        return list(self._by_slug.values())
 
     def by_slug(self, slug: str) -> TenantEntry | None:
         self._ensure()

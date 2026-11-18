@@ -70,6 +70,11 @@ pnpm check:web && pnpm build:web
   after the block when the outcome must be committed anyway (e.g. failed-login counters).
 - Every write calls `audit.record(...)` in the same transaction.
 - Route protection: `Depends(require("<permission>"))`; `PrincipalDep` for "signed in".
+- Modules: `modules/<id>/backend/` is a Python package with `setup(host)` (see `heinzel_api/modules.py`);
+  routes are mounted under `/api/v1/<id>` and answer 404 while the module is off. Migrations in
+  `backend/migrations/` (env.py calls `run_module_env()`), own version table in `mod_<id>`; `heinzel migrate`
+  runs the core first, then every module. Keep rules in a service layer the routes, inbox actions, jobs
+  and MCP tools share. Lint modules too: `uv run ruff check . ../../modules` from apps/api.
 
 ## Decisions taken during implementation
 
@@ -150,6 +155,12 @@ Phase 1 (core platform and admin console) is complete.
       Ctrl K dialog (filter chips, keyboard, highlights); `heinzel reindex-search`
 - [x] CLI refuses to run (except `migrate`) while migrations are pending
 
+- [x] Module host: backend packages with `setup(host)`, routers per module (404 while off), module migrations
+      with their own version table, in-process events (`events.publish/subscribe`, `core.user.deactivated`),
+      scheduled jobs (advisory lock, `heinzel run-jobs`), home widgets (`GET /api/v1/home`)
+- [x] Aufgaben (first module): personal and shared lists with members, quick add, due tags, assignment via
+      Mein Eingang (action "Erledigt", notice to the creator), pictures, search, widget "Heute fällig",
+      reminders (inbox or inbox + e-mail), retention, hand-back on deactivation; Übersicht redesigned
+
 Next, in this order:
-- [ ] First module: Aufgaben (spec in docs/concept/modules/aufgaben.md)
 - [ ] MCP gateway (tools from manifests, respects permissions and `mcp_disabled`)

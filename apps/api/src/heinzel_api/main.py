@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 from urllib.parse import urlsplit
 
@@ -9,8 +10,10 @@ from heinzel_api import search as search_index
 from heinzel_api.config import Settings, get_settings
 from heinzel_api.db import make_sessionmaker
 from heinzel_api.files import ClamdScanner, NoScanner, Scanner, Storage, make_storage
+from heinzel_api.jobs import all_jobs, scheduler
 from heinzel_api.mail import Mailer, SmtpMailer
 from heinzel_api.manifests import load_manifests
+from heinzel_api.modules import load_modules, mount
 from heinzel_api.ratelimit import RateLimiter, ValkeyRateLimiter
 from heinzel_api.routes import (
     account,
@@ -21,6 +24,7 @@ from heinzel_api.routes import (
     auth,
     files,
     health,
+    home,
     inbox,
     me,
     search,
@@ -41,11 +45,15 @@ def create_app(
     settings = settings or get_settings()
     settings.check()
 
+    manifests = load_manifests(settings.modules_dir)
+    hosts = load_modules(manifests, settings.modules_dir)
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.settings = settings
-        app.state.manifests = load_manifests(settings.modules_dir)
-        search_index.providers_from_manifests(app.state.manifests)
+        app.state.manifests = manifests
+        app.state.modules = hosts
+        search_index.providers_from_manifests(manifests)
         app.state.audit_chain = {}
         app.state.db = make_sessionmaker(settings.database_url)
         app.state.registry = TenantRegistry(app.state.db)
@@ -57,7 +65,12 @@ def create_app(
             if settings.clamd_host
             else NoScanner()
         )
+        task = None
+        if settings.jobs_enabled and settings.env != "test" and all_jobs(hosts):
+            task = asyncio.create_task(scheduler(app))
         yield
+        if task:
+            task.cancel()
 
     app = FastAPI(title="Heinzel API", version=__version__, lifespan=lifespan)
 
@@ -84,6 +97,8 @@ def create_app(
     app.include_router(files.router)
     app.include_router(inbox.router)
     app.include_router(search.router)
+    app.include_router(home.router)
+    mount(app, hosts)
     return app
 
 

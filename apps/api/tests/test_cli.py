@@ -7,10 +7,10 @@ from heinzel_api.cli import main, pending_migrations
 
 
 def test_pending_migrations_detected(migrated, monkeypatch, capsys):
-    assert pending_migrations(OWNER_URL) == (None, None)
+    assert pending_migrations(OWNER_URL) == []
     monkeypatch.setattr(ScriptDirectory, "get_current_head", lambda self: "9999_future")
-    current, head = pending_migrations(OWNER_URL)
-    assert head == "9999_future" and current is not None
+    behind = pending_migrations(OWNER_URL)
+    assert behind[0][0] == "core" and behind[0][2] == "9999_future" and behind[0][1]
     monkeypatch.setenv("HEINZEL_MIGRATION_DATABASE_URL", OWNER_URL)
     from heinzel_api.config import get_settings
 

@@ -18,7 +18,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from heinzel_api import audit, identity, inbox, mail, rbac
+from heinzel_api import audit, events, identity, inbox, mail, rbac
 from heinzel_api.db import tenant_session
 from heinzel_api.deps import (
     DbDep,
@@ -263,6 +263,9 @@ def deactivate_user(
             ip=client_ip(request),
         )
         s.flush()
+        events.publish(
+            s, tenant.id, "core.user.deactivated", user_id=user.id, actor_user_id=actor.user_id
+        )
         return _user_out(s, user)
 
 

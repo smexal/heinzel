@@ -45,6 +45,8 @@ class QuickAction(BaseModel):
     label: str
     path: str
     module: str
+    description: str | None = None
+    icon: str | None = None
 
 
 class ShellBranding(BaseModel):
@@ -62,6 +64,7 @@ class ShellBranding(BaseModel):
 
 
 class ShellUser(BaseModel):
+    id: str
     display_name: str
     email: str
     initials: str
@@ -161,7 +164,12 @@ def build_shell(
                 continue
             quick_actions.append(
                 QuickAction(
-                    key=qa["key"], label=_text(qa["label"]), path=qa["path"], module=manifest.id
+                    key=qa["key"],
+                    label=_text(qa["label"]),
+                    path=qa["path"],
+                    module=manifest.id,
+                    description=_text(qa["description"]) if qa.get("description") else None,
+                    icon=qa.get("icon") or manifest.navigation.entry.icon,
                 )
             )
 
@@ -214,6 +222,7 @@ def get_shell(
     if p is None or not p.mfa_passed:
         return build_shell(tenant, request.app.state.manifests, None)
     user = ShellUser(
+        id=str(p.user_id),
         display_name=p.display_name,
         email=p.email,
         initials=_initials(p.display_name),

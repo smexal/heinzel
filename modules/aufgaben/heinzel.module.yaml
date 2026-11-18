@@ -23,7 +23,7 @@ navigation:
 
 contributes:
   quick_actions:
-    - { key: aufgabe-erfassen, label: { de: Aufgabe erfassen }, path: "/aufgaben?neu=1", permission: aufgaben.use }
+    - { key: aufgabe-erfassen, label: { de: Aufgabe erfassen }, description: { de: Für dich oder eine geteilte Liste }, path: "/aufgaben?neu=1", permission: aufgaben.use }
   dashboard_widgets: [heute-faellig]
   inbox_items: [task-assigned, task-completed]
   search_providers:

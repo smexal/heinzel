@@ -69,7 +69,7 @@ def test_module_documents_filtered_twice(api, make_user, app_factory):
                 s,
                 tid,
                 module="aufgaben",
-                entity_type="task",
+                entity_type="demo",
                 entity_id=f"{tag}-{i}",
                 title=f"Fenstergriff {tag} Nummer {i}",
                 body="Im Atelier beim Werkraum ist der Griff lose.",
@@ -79,12 +79,16 @@ def test_module_documents_filtered_twice(api, make_user, app_factory):
                 chip={"label": "Geplant", "tone": "neutral"},
             )
     search.register_provider(
-        "aufgaben", "task", can_view=lambda s, uid, ids: {i for i in ids if not i.endswith("-1")}
+        "aufgaben",
+        "demo",
+        label="Aufgaben",
+        icon="check-square",
+        can_view=lambda s, uid, ids: {i for i in ids if not i.endswith("-1")},
     )
     try:
         enrol(api, make_user())
         res = _search(api, f"{tag} werkraum")
-        tasks = _groups(res)["aufgaben.task"]
+        tasks = _groups(res)["aufgaben.demo"]
         # -1 hidden by can_view, -2 by permission: never counted
         assert tasks["count"] == 1 and tasks["label"] == "Aufgaben"
         assert tasks["icon"] == "check-square"
@@ -94,18 +98,18 @@ def test_module_documents_filtered_twice(api, make_user, app_factory):
         a, b = item["snippet_hl"][0]
         assert item["snippet"][a:b] == "Werkraum"
         # German stemming: plural finds the singular
-        assert _groups(_search(api, f"{tag} fenstergriffe")).get("aufgaben.task")
+        assert _groups(_search(api, f"{tag} fenstergriffe")).get("aufgaben.demo")
     finally:
-        search.register_provider("aufgaben", "task", can_view=lambda s, uid, ids: set(ids))
+        search._providers.pop(("aufgaben", "demo"), None)
         with tenant_session(app_factory, tid) as s:
-            search.remove(s, tid, module="aufgaben", entity_type="task")
+            search.remove(s, tid, module="aufgaben", entity_type="demo")
 
 
 def test_search_disabled_by_module_setting(api, make_user, app_factory):
     tid, tag = _tid(api), uuid.uuid4().hex[:6]
     with tenant_session(app_factory, tid) as s:
         search.index(
-            s, tid, module="aufgaben", entity_type="task", entity_id=tag, title=tag, link="/a"
+            s, tid, module="aufgaben", entity_type="demo", entity_id=tag, title=tag, link="/a"
         )
     tenant = api.app.state.registry.by_slug("schmelzi").config
     off = tenant.model_copy(deep=True)
@@ -115,7 +119,7 @@ def test_search_disabled_by_module_setting(api, make_user, app_factory):
         kw = dict(manifests=api.app.state.manifests, user_id=uuid.uuid4(), permissions=perms)
         assert search.run(s, tenant=tenant, q=tag, **kw).total == 1
         assert search.run(s, tenant=off, q=tag, **kw).total == 0
-        search.remove(s, tid, module="aufgaben", entity_id=tag, entity_type="task")
+        search.remove(s, tid, module="aufgaben", entity_id=tag, entity_type="demo")
 
 
 def test_pages_follow_permissions(api, make_user):

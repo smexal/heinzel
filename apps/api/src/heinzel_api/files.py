@@ -271,6 +271,31 @@ def link(
     return rows
 
 
+def delete(session: Session, storage: Storage, att: Attachment) -> None:
+    """Remove one file: bytes from storage, the row stays marked deleted (audit trail)."""
+    storage.delete(att.storage_key)
+    att.deleted_at = datetime.now(UTC)
+    session.flush()
+
+
+def for_target(
+    session: Session, *, module: str, target_type: str, target_id: str
+) -> list[Attachment]:
+    """Live attachments of one module object, oldest first."""
+    return list(
+        session.scalars(
+            select(Attachment)
+            .where(
+                Attachment.module == module,
+                Attachment.target_type == target_type,
+                Attachment.target_id == target_id,
+                Attachment.deleted_at.is_(None),
+            )
+            .order_by(Attachment.created_at)
+        )
+    )
+
+
 def delete_for_target(
     session: Session, storage: Storage, *, module: str, target_type: str, target_id: str
 ) -> int:

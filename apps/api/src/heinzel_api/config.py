@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     # Dev only: send mail to this SMTP host instead of the one in tenant.json
     # (in the Docker stack Mailpit is "mailpit", not localhost).
     smtp_host_override: str | None = None
+    # Scheduled module jobs (reminders, retention) in the API process. Never in tests.
+    jobs_enabled: bool = True
     valkey_url: str = "redis://localhost:6379/0"
     tenants_dir: Path = REPO_ROOT / "tenants"
     modules_dir: Path = REPO_ROOT / "modules"

@@ -4,7 +4,8 @@ FastAPI core: tenants, identity, permissions, audit, module host, MCP gateway (l
 
 ```bash
 uv sync
-uv run heinzel migrate                 # schema core, role heinzel_app, RLS policies
+uv run heinzel migrate                 # core (schema core, role heinzel_app, RLS), then every module
+uv run heinzel run-jobs [aufgaben.reminders]   # module jobs once (the API also runs them itself)
 uv run heinzel seed-tenants            # register tenants/<slug> (settings only for new tenants)
 uv run heinzel seed-tenants --reset-config   # overwrite settings and logos from tenants/<slug>
 uv run heinzel create-admin --tenant schmelzi --email you@example.org --name "Vorname Name"
@@ -68,6 +69,8 @@ policies show and accept only that tenant's rows. Migrations of new tenant table
 | `GET /api/v1/inbox?view=open\|notices\|done&source=` | Mein Eingang with counts and sources |
 | `POST /api/v1/inbox/{id}/read\|unread\|done\|reopen`, `/read-all` | item state |
 | `POST /api/v1/inbox/{id}/actions/{key}` | action button, handled by the source module |
+| `GET /api/v1/home` | Übersicht widgets of active modules |
+| `/api/v1/<module>/...` | module routes (Aufgaben: see modules/aufgaben/README.md); 404 while the module is off |
 | `GET /api/v1/search?q=&group=` | global search: pages, people (user admins), module entities; permission-filtered twice |
 | `GET /api/v1/admin/roles` | roles with expanded permissions and the permission catalogue |
 
@@ -99,3 +102,15 @@ every file's size and SHA-256 are in `core.attachment`. To move to another disk 
 A different backend (e.g. a self-hosted or Swiss S3-compatible store, not AWS) is one class
 implementing `put/get/delete/exists/iter_keys` in `heinzel_api.files`, a new value for
 `HEINZEL_STORAGE`, and the same copy/verify steps.
+
+## Modules
+
+A module with backend code has a package `modules/<id>/backend/` with `setup(host)`; the core
+imports it as `heinzel_modules.<id>` at startup (`heinzel_api.modules`). Through the host a module
+adds its router (`/api/v1/<id>`), home widgets (declared in `contributes.dashboard_widgets`) and
+scheduled jobs; it registers search providers, file access checks, inbox actions and event handlers
+with the core services directly. Its tables live in schema `mod_<id>` with migrations in
+`backend/migrations/` and their own version table, so modules are migrated independently.
+
+Jobs run inside each API process every few minutes (not in tests, `HEINZEL_JOBS_ENABLED=false`
+turns them off); an advisory lock makes sure only one process runs a job at a time.

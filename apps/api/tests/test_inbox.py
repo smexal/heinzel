@@ -111,7 +111,7 @@ def test_actions_dispatch_to_source(api, make_user, app_factory):
             s,
             _tid(api),
             [uid],
-            source="aufgaben",
+            source="demo",
             kind="task",
             title="Übernehmen?",
             actions=[inbox.Action("take", "Selbst übernehmen", "primary")],
@@ -119,13 +119,13 @@ def test_actions_dispatch_to_source(api, make_user, app_factory):
     item = api.get("/api/v1/inbox").json()["items"][0]
     assert api.post(f"/api/v1/inbox/{item['id']}/actions/take").status_code == 409  # no handler
     calls = []
-    inbox.register_action("aufgaben", lambda s, it, key, u: calls.append(key) or "Übernommen.")
+    inbox.register_action("demo", lambda s, it, key, u: calls.append(key) or "Übernommen.")
     try:
         r = api.post(f"/api/v1/inbox/{item['id']}/actions/take")
         assert r.status_code == 200 and r.json()["message"] == "Übernommen." and calls == ["take"]
         assert api.post(f"/api/v1/inbox/{item['id']}/actions/other").status_code == 409
     finally:
-        inbox._handlers.pop("aufgaben", None)
+        inbox._handlers.pop("demo", None)
 
 
 def test_core_notices_for_invite_and_roles(api, make_user):

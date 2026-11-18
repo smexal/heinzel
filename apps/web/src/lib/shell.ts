@@ -22,9 +22,12 @@ export type QuickAction = {
 	label: string;
 	path: string;
 	module: string;
+	description: string | null;
+	icon: string | null;
 };
 
 export type ShellUser = {
+	id: string;
 	display_name: string;
 	email: string;
 	initials: string;

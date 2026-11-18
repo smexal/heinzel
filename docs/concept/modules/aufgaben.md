@@ -4,7 +4,7 @@
 | --- | --- |
 | Module ID | `aufgaben` |
 | Area | Top section, below Übersicht and Mein Eingang (no area) |
-| Status | Specified, first module |
+| Status | v1 implemented (Nov 2026); MCP tools follow with the MCP gateway |
 | Business owner | Leitung IT |
 | Runtime | In-process |
 | Replaces | Personal notes, sticky notes and Excel to-do lists |
@@ -95,3 +95,15 @@ None required. Optional CSV import of existing to-do lists later.
 - [ ] Should members see done tasks of a shared list forever or only for 30 days?
 - [ ] Decided: the reminder channel is a module setting (inbox, inbox and email, none).
 - [ ] Recurring tasks already in v1?
+
+## 12. Implementation notes
+
+- **Code:** modules/aufgaben/backend (setup, service, routes, models, migrations in schema mod\_aufgaben), UI in apps/web/src/routes/(app)/aufgaben, tests in apps/api/tests/test\_aufgaben.py. The rules sit in one service layer that the routes, the inbox action, the jobs and later the MCP tools share.
+- **Lists:** each user gets the personal list on first use; its name always comes from the setting "Name der persönlichen Liste". Shared lists are managed in a dialog on the page (create, rename, members, leave, delete).
+- **Visibility:** members of the task's list and the assignee. Only members delete a task or move it to another list. With "Zuweisen an: alle Benutzer" an assignee outside the list sees the task in "Alle meine Listen".
+- **Mein Eingang:** assigning delivers "Zugewiesen: …" with the action Erledigt and the task's pictures; reassigning moves it, completing closes it and notifies the creator ("Erledigt: …"). New members of a shared list get a notice.
+- **Reminders:** a job every 15 minutes delivers one reminder per due date ("Heute fällig" or "Überfällig") to the assignee, else to the creator; with "Im Eingang und per E-Mail" an e-mail too. Changing the due date allows a new reminder.
+- **Retention:** a job every 6 hours deletes done tasks older than the setting, with their pictures (audited as one event per run).
+- **Deactivation:** open tasks of a deactivated user go back to the owner of the shared list (inbox item "Zurück bei dir"), in personal lists to nobody.
+- **Pictures:** core files service (sniffed type, virus scan, tenant storage); only images can be attached; visible to whoever may see the task.
+- **Search and Übersicht:** tasks are indexed with title and note and a status chip (Überfällig, Heute, Erledigt); the widget "Heute fällig" lists overdue and today's tasks that are assigned to the user or unassigned in their lists.

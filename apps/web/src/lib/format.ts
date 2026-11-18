@@ -91,6 +91,8 @@ export function formatter(loc: Partial<Localization> | null | undefined) {
 		time,
 		dateTime: (v: string | Date) => `${date(v)} ${time(v)}`,
 		weekday: (v: string | Date) => weekday.format(new Date(v)),
+		/** "18. November" */
+		dayMonth: (v: string | Date) => dayMonth.format(new Date(v)),
 		number,
 		relative,
 		/** Same calendar day in the user's time zone. */

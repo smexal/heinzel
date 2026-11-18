@@ -20,40 +20,35 @@ import uuid
 from pathlib import Path
 
 from alembic import command
-from alembic.config import Config
-from alembic.runtime.migration import MigrationContext
-from alembic.script import ScriptDirectory
 from sqlalchemy import select
 
-from heinzel_api import audit, identity, rbac, search
+from heinzel_api import audit, identity, migrate, rbac, search
 from heinzel_api.config import Settings, get_settings
-from heinzel_api.db import get_engine, make_sessionmaker, tenant_session
+from heinzel_api.db import make_sessionmaker, tenant_session
 from heinzel_api.files import LocalStorage, Storage, make_storage
 from heinzel_api.manifests import load_manifests
 from heinzel_api.models import Attachment, Tenant, TenantAsset, TenantSettings
 from heinzel_api.tenants import TenantConfig, load_tenants
 
-API_DIR = Path(__file__).resolve().parents[2]
 
-
-def run_migrations(url: str, revision: str = "head", down: bool = False) -> None:
-    cfg = Config(str(API_DIR / "alembic.ini"))
-    cfg.attributes["url"] = url
-    if down:
-        command.downgrade(cfg, revision)
+def run_migrations(
+    url: str, revision: str = "head", down: bool = False, modules_dir: Path | None = None
+) -> None:
+    """head / base: the core and every module; any other revision: the core only."""
+    modules_dir = modules_dir or get_settings().modules_dir
+    if revision == "head" and not down:
+        migrate.upgrade(url, modules_dir)
+    elif revision == "base" and down:
+        migrate.downgrade_all(url, modules_dir)
+    elif down:
+        command.downgrade(migrate.core_config(url), revision)
     else:
-        command.upgrade(cfg, revision)
+        command.upgrade(migrate.core_config(url), revision)
 
 
-def pending_migrations(url: str) -> tuple[str | None, str | None]:
-    """(current, head) when the database is behind the code, else (None, None)."""
-    script = ScriptDirectory.from_config(Config(str(API_DIR / "alembic.ini")))
-    head = script.get_current_head()
-    with get_engine(url).connect() as conn:
-        current = MigrationContext.configure(
-            conn, opts={"version_table_schema": "core"}
-        ).get_current_revision()
-    return (current, head) if current != head else (None, None)
+def pending_migrations(url: str, modules_dir: Path | None = None) -> list[tuple]:
+    """Parts (core, modules) whose database schema is behind the code."""
+    return migrate.pending(url, modules_dir or get_settings().modules_dir)
 
 
 def tenant_ids(settings: Settings) -> list[tuple[str, uuid.UUID]]:
@@ -267,6 +262,34 @@ def demo_inbox(settings: Settings, slug: str, email: str) -> int:
     return len(items)
 
 
+def run_jobs(settings: Settings, only: str | None = None) -> int:
+    from heinzel_api.jobs import all_jobs, run_once
+    from heinzel_api.mail import SmtpMailer
+    from heinzel_api.modules import JobContext, load_modules
+    from heinzel_api.tenants import TenantRegistry
+
+    manifests = load_manifests(settings.modules_dir)
+    hosts = load_modules(manifests, settings.modules_dir)
+    db = make_sessionmaker(settings.database_url)
+    ctx = JobContext(
+        db=db,
+        tenants=TenantRegistry(db).all(),
+        manifests=manifests,
+        mailer=SmtpMailer(settings.smtp_host_override, settings.secret_key),
+        storage=make_storage(settings),
+        settings=settings,
+    )
+    jobs = [j for j in all_jobs(hosts) if only in (None, j.name)]
+    if not jobs:
+        print(f"Kein Job '{only}'" if only else "Keine Jobs", file=sys.stderr)
+        return 1
+    for job in jobs:
+        ran = run_once(job, ctx, settings.database_url)
+        note = "" if ran else " (läuft gerade oder fehlgeschlagen)"
+        print(f"{'✓' if ran else '–'} {job.name}{note}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="heinzel")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -287,6 +310,8 @@ def main(argv: list[str] | None = None) -> int:
     di = sub.add_parser("demo-inbox", help="put example items into a user's Mein Eingang")
     di.add_argument("--tenant", required=True)
     di.add_argument("--email", required=True)
+    rj = sub.add_parser("run-jobs", help="run the modules' scheduled jobs once")
+    rj.add_argument("job", nargs="?", help="only this job, e.g. aufgaben.reminders")
     sub.add_parser("reindex-search", help="rebuild the core's search index (people)")
     fl = sub.add_parser("files", help="check or move stored files")
     fsub = fl.add_subparsers(dest="files_cmd", required=True)
@@ -297,16 +322,19 @@ def main(argv: list[str] | None = None) -> int:
 
     settings = get_settings()
     if args.cmd != "migrate":
-        current, head = pending_migrations(settings.migration_database_url)
-        if head is not None:
+        behind = pending_migrations(settings.migration_database_url, settings.modules_dir)
+        if behind:
+            parts = ", ".join(f"{n} (Stand {c or 'leer'}, benötigt {h})" for n, c, h in behind)
             print(
-                f"Die Datenbank ist nicht aktuell (Stand {current or 'leer'}, benötigt {head}).\n"
+                f"Die Datenbank ist nicht aktuell: {parts}.\n"
                 "Zuerst ausführen: uv run heinzel migrate",
                 file=sys.stderr,
             )
             return 3
     if args.cmd == "migrate":
-        run_migrations(settings.migration_database_url, args.revision)
+        run_migrations(
+            settings.migration_database_url, args.revision, modules_dir=settings.modules_dir
+        )
     elif args.cmd == "seed-tenants":
         for slug in seed_tenants(settings, reset_config=args.reset_config):
             print(f"✓ {slug}")
@@ -324,6 +352,8 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "demo-inbox":
         n = demo_inbox(settings, args.tenant, args.email)
         print(f"✓ {n} Beispiel-Einträge für {args.email}")
+    elif args.cmd == "run-jobs":
+        return run_jobs(settings, args.job)
     elif args.cmd == "reindex-search":
         factory = make_sessionmaker(settings.migration_database_url)
         for slug, tid in tenant_ids(settings):
