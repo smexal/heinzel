@@ -78,6 +78,7 @@ pnpm check:web && pnpm build:web
 - Mail is sent synchronously after commit (`heinzel_api.mail`); failures are reported (`mail_sent: false`) and
   logged. Replace with the outbox + worker when the worker exists. SMTP passwords are referenced as
   `env:VAR` in tenant.json, never stored there.
+- Sensitive actions use `require_step_up(permission)`; the web wraps them in `withStepUp()`.
 - Admins can only grant roles whose permissions they hold themselves; the last active admin cannot be
   deactivated or lose the admin role; nobody can deactivate themselves.
 - Rate limiting fails open when Valkey is down (lockout still applies).
@@ -109,6 +110,10 @@ Done:
 - [x] Mein Profil: Sprache & Region (tenant defaults and locks, preview), Darstellung (light/dark/system, per browser), Sicherheit (change password, 2FA status)
 - [x] Formatting: `#lib/format.ts` `formatter(shell.user.localization)`; never format dates or numbers elsewhere
 
+- [x] Custom roles (create, edit, delete; staff permissions editable, admin fixed) and step-up confirmation
+      (`require_step_up`, `POST /auth/step-up`, 10 min) for role definitions and role assignments; web: `withStepUp()`
+- [x] Manifest default permissions are applied once per tenant (`core.permission_seeded`), so seeding never undoes an admin's change
+
 Next, in this order:
-- [ ] Admin console, rest: custom roles (create/edit; step-up 2FA for role changes as in the design), Module, Einstellungen (Branding, Sprache & Region, Navigation, Anmeldung, E-Mail)
+- [ ] Admin console, rest: Module, Einstellungen (Branding, Sprache & Region, Navigation, Anmeldung, E-Mail)
 - [ ] Then Phase 2 engines (inbox, search, files), then the first module: Aufgaben

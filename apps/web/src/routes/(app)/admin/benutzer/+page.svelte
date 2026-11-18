@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { invalidateAll } from '$app/navigation';
-	import { ApiError, post, put } from '#lib/api.ts';
+	import { ApiError, post, put, send } from '#lib/api.ts';
+	import { StepUpCancelled, withStepUp } from '#lib/stepup.svelte.ts';
 	import Icon from '#lib/components/Icon.svelte';
 	import { formatter, initials } from '#lib/format.ts';
 	import type { AdminUser } from './+page.server.ts';
@@ -45,7 +46,11 @@
 			'Diese Rolle hat Berechtigungen, die du selbst nicht hast. Du kannst sie nicht vergeben.',
 		unknown_role: 'Eine der Rollen gibt es nicht mehr. Lade die Seite neu.',
 		not_invited: 'Diese Person hat die Einladung bereits angenommen.',
-		forbidden: 'Dafür fehlt dir die Berechtigung.'
+		forbidden: 'Dafür fehlt dir die Berechtigung.',
+		role_in_use: 'Die Rolle ist noch Personen zugewiesen. Entferne sie zuerst bei diesen Personen.',
+		system_role: 'Fest eingerichtete Rollen können nicht gelöscht werden.',
+		admin_role_fixed: 'Die Rolle Administration hat immer alle Berechtigungen.',
+		unknown_permission: 'Eine Berechtigung gibt es nicht mehr. Lade die Seite neu.'
 	};
 
 	async function act(action: () => Promise<string>) {
@@ -54,6 +59,7 @@
 			notice = { tone: 'ok', text: await action() };
 			await invalidateAll();
 		} catch (e) {
+			if (e instanceof StepUpCancelled) return;
 			const detail = e instanceof ApiError ? e.detail : '';
 			notice = {
 				tone: 'error',
@@ -139,7 +145,7 @@
 		if (!u) return;
 		rolesDialog.close();
 		await act(async () => {
-			await put(`/admin/users/${u.id}/roles`, { roles: rolesSel });
+			await withStepUp(() => put(`/admin/users/${u.id}/roles`, { roles: rolesSel }));
 			return `Rollen von ${u.display_name} gespeichert.`;
 		});
 	}
@@ -211,6 +217,85 @@
 		return u.mfa_enabled
 			? { text: '2FA aktiv', tone: 'strong' }
 			: { text: '2FA ausstehend', tone: 'warn' };
+	}
+
+	// --- role editor ----------------------------------------------------------------------
+	const mine = $derived(new Set(data.myPermissions));
+	let roleDialog: HTMLDialogElement;
+	let editing = $state<{
+		key: string | null;
+		is_system: boolean;
+		members: number;
+		name: string;
+		description: string;
+		permissions: string[];
+	}>({ key: null, is_system: false, members: 0, name: '', description: '', permissions: [] });
+	let roleError = $state('');
+
+	function newRole() {
+		editing = {
+			key: null,
+			is_system: false,
+			members: 0,
+			name: '',
+			description: '',
+			permissions: []
+		};
+		roleError = '';
+		roleDialog.showModal();
+	}
+
+	function editRole(key: string) {
+		const r = data.roles.find((x) => x.key === key);
+		if (!r) return;
+		editing = {
+			key: r.key,
+			is_system: r.is_system,
+			members: r.members,
+			name: r.name,
+			description: r.description ?? '',
+			permissions: [...r.permissions]
+		};
+		roleError = '';
+		roleDialog.showModal();
+	}
+
+	async function saveRole(e: SubmitEvent) {
+		e.preventDefault();
+		const r = editing;
+		const body = { name: r.name, description: r.description || null, permissions: r.permissions };
+		roleError = '';
+		try {
+			await withStepUp(() =>
+				r.key ? put(`/admin/roles/${r.key}`, body) : post('/admin/roles', body)
+			);
+			roleDialog.close();
+			notice = {
+				tone: 'ok',
+				text: r.key ? `Rolle ${r.name} gespeichert.` : `Rolle ${r.name} angelegt.`
+			};
+			await invalidateAll();
+		} catch (err) {
+			if (err instanceof StepUpCancelled) return;
+			const d = err instanceof ApiError ? err.detail : '';
+			roleError = ERRORS[d] ?? 'Das hat nicht geklappt. Bitte versuche es erneut.';
+		}
+	}
+
+	async function deleteRole() {
+		const r = editing;
+		if (!r.key) return;
+		roleError = '';
+		try {
+			await withStepUp(() => send('DELETE', `/admin/roles/${r.key}`));
+			roleDialog.close();
+			notice = { tone: 'ok', text: `Rolle ${r.name} gelöscht.` };
+			await invalidateAll();
+		} catch (err) {
+			if (err instanceof StepUpCancelled) return;
+			const d = err instanceof ApiError ? err.detail : '';
+			roleError = ERRORS[d] ?? 'Das hat nicht geklappt. Bitte versuche es erneut.';
+		}
 	}
 
 	// --- roles matrix ---------------------------------------------------------------------
@@ -397,12 +482,17 @@
 		</div>
 	{:else}
 		<section class="roles" aria-labelledby="mx-h">
-			<div>
-				<h2 id="mx-h">Rollen &amp; Berechtigungen</h2>
-				<p class="sub">
-					Module bringen ihre Berechtigungen mit. Die Rollen Administration und Mitarbeitende sind
-					fest eingerichtet; eigene Rollen folgen.
-				</p>
+			<div class="roles-head">
+				<div>
+					<h2 id="mx-h">Rollen &amp; Berechtigungen</h2>
+					<p class="sub">
+						Module bringen ihre Berechtigungen mit. Klicke auf eine Rolle, um sie zu bearbeiten.
+						Änderungen bestätigst du erneut mit 2FA.
+					</p>
+				</div>
+				<button class="btn btn-secondary" type="button" onclick={newRole}>
+					<Icon name="plus" size={18} />Neue Rolle
+				</button>
 			</div>
 			<div class="card table-wrap">
 				<table class="matrix">
@@ -410,9 +500,16 @@
 						<tr>
 							<th scope="col">Berechtigung</th>
 							{#each data.roles as r (r.key)}
-								<th scope="col"
-									>{r.name}<small>{r.members} {r.members === 1 ? 'Person' : 'Personen'}</small></th
-								>
+								<th scope="col">
+									{#if r.key === 'admin'}
+										<span class="rolehead" title="Hat immer alle Berechtigungen">{r.name}</span>
+									{:else}
+										<button type="button" class="rolehead edit" onclick={() => editRole(r.key)}>
+											{r.name}<span class="sr-only"> bearbeiten</span>
+										</button>
+									{/if}
+									<small>{r.members} {r.members === 1 ? 'Person' : 'Personen'}</small>
+								</th>
 							{/each}
 						</tr>
 					</thead>
@@ -498,6 +595,77 @@
 				>Abbrechen</button
 			>
 			<button class="btn btn-primary" type="submit">Rollen speichern</button>
+		</div>
+	</form>
+</dialog>
+
+<dialog bind:this={roleDialog} class="dialog card wide" aria-labelledby="re-h">
+	<form onsubmit={saveRole}>
+		<h2 id="re-h">{editing.key ? `Rolle ${editing.name} bearbeiten` : 'Neue Rolle'}</h2>
+		{#if editing.is_system}
+			<p class="sub">
+				Fest eingerichtete Rolle: Name und Beschreibung bleiben, die Berechtigungen kannst du
+				anpassen.
+			</p>
+		{/if}
+		<label class="field">
+			<span>Name</span>
+			<input
+				class="input"
+				required
+				maxlength="200"
+				bind:value={editing.name}
+				disabled={editing.is_system}
+			/>
+		</label>
+		<label class="field">
+			<span>Beschreibung <small>(optional)</small></span>
+			<input
+				class="input"
+				maxlength="500"
+				bind:value={editing.description}
+				disabled={editing.is_system}
+			/>
+		</label>
+		<fieldset class="perms">
+			<legend>Berechtigungen</legend>
+			{#each groups as [label, perms] (label)}
+				<p class="group-label">{label}</p>
+				{#each perms as p (p.id)}
+					<label class="check" class:locked={!mine.has(p.id)}>
+						<input
+							type="checkbox"
+							value={p.id}
+							bind:group={editing.permissions}
+							disabled={!mine.has(p.id)}
+						/>
+						<span
+							><strong>{p.label}</strong><small
+								>{mine.has(p.id) ? p.id : `${p.id} · hast du selbst nicht`}</small
+							></span
+						>
+					</label>
+				{/each}
+			{/each}
+		</fieldset>
+		{#if roleError}<p class="notice error" role="alert">{roleError}</p>{/if}
+		<div class="buttons">
+			{#if editing.key && !editing.is_system}
+				<button
+					class="btn btn-danger left"
+					type="button"
+					onclick={deleteRole}
+					disabled={editing.members > 0}
+					title={editing.members > 0 ? 'Die Rolle ist noch Personen zugewiesen' : undefined}
+					>Rolle löschen</button
+				>
+			{/if}
+			<button class="btn btn-secondary" type="button" onclick={() => roleDialog.close()}
+				>Abbrechen</button
+			>
+			<button class="btn btn-primary" type="submit"
+				>{editing.key ? 'Speichern' : 'Rolle anlegen'}</button
+			>
 		</div>
 	</form>
 </dialog>
@@ -792,6 +960,7 @@
 		color: var(--muted);
 	}
 	.yes {
+		display: inline-flex;
 		color: var(--primary-strong);
 	}
 	.no {
@@ -857,6 +1026,57 @@
 	.check small {
 		color: var(--muted);
 		font-size: 13px;
+	}
+	.roles-head {
+		display: flex;
+		flex-wrap: wrap;
+		justify-content: space-between;
+		align-items: flex-end;
+		gap: 12px;
+	}
+	.rolehead {
+		display: inline-flex;
+		align-items: center;
+		min-height: 36px;
+		font: inherit;
+		font-weight: 600;
+		color: var(--ink);
+	}
+	.rolehead.edit {
+		padding: 0 8px;
+		border: 0;
+		border-radius: 8px;
+		background: none;
+		cursor: pointer;
+		color: var(--link);
+		text-decoration: underline;
+		text-decoration-color: color-mix(in oklab, currentColor 30%, transparent);
+		text-underline-offset: 3px;
+	}
+	.rolehead.edit:hover {
+		background: var(--hover);
+	}
+	.dialog.wide {
+		width: min(640px, calc(100vw - 32px));
+		max-height: calc(100vh - 48px);
+	}
+	.perms {
+		gap: 6px;
+	}
+	.group-label {
+		margin: 8px 0 2px;
+		font-size: 12px;
+		font-weight: 600;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--muted-2);
+	}
+	.check.locked {
+		opacity: 0.6;
+		cursor: default;
+	}
+	.left {
+		margin-right: auto;
 	}
 	.buttons {
 		display: flex;

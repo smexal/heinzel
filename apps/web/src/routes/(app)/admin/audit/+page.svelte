@@ -79,6 +79,10 @@
 		}
 		if (e.action === 'auth.login_failed') return String(e.data.email ?? '');
 		if (e.action === 'audit.exported') return `${e.data.rows ?? 0} Einträge · CSV`;
+		if (e.target_type === 'role') {
+			const n = e.data.name;
+			return `Rolle ${Array.isArray(n) ? n[n.length - 1] : (n ?? e.target_id ?? '')}`;
+		}
 		return e.target_id ?? '';
 	}
 
@@ -223,7 +227,7 @@
 							<td colspan="4">
 								<div class="box">
 									<div class="change">
-										{#if e.action === 'user.roles_changed'}
+										{#if e.action === 'user.roles_changed' || (e.action === 'role.updated' && (e.data.added || e.data.removed))}
 											<span class="lbl">Änderung</span>
 											<div class="diff">
 												{#each list(e.data.removed) as r (r)}<span class="del">{r}</span>{/each}

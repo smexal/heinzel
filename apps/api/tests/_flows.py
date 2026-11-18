@@ -34,3 +34,9 @@ def link_token(text: str) -> str:
     m = re.search(r"/konto/([A-Za-z0-9_-]+)", text)
     assert m, text
     return m.group(1)
+
+
+def step_up(api, totp: pyotp.TOTP, ahead: int = 30):
+    """Re-confirm with a not yet used TOTP step."""
+    r = api.post("/api/v1/auth/step-up", json={"code": totp.at(time.time() + ahead)})
+    assert r.status_code == 200, r.text

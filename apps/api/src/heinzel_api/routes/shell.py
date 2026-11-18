@@ -59,6 +59,7 @@ class ShellUser(BaseModel):
     display_name: str
     email: str
     initials: str
+    mfa_enabled: bool
     # Effective language and regional settings, for formatting in the client
     localization: dict[str, str]
 
@@ -203,6 +204,7 @@ def get_shell(
         display_name=p.display_name,
         email=p.email,
         initials=_initials(p.display_name),
+        mfa_enabled=p.mfa_enabled,
         localization=localization.effective(tenant, p.preferences),
     )
     return build_shell(tenant, request.app.state.manifests, p.permissions, user)

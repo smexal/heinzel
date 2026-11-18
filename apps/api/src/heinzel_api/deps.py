@@ -2,6 +2,7 @@
 
 import ipaddress
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from uuid import UUID
 
@@ -41,6 +42,7 @@ class Principal:
     roles: list[str] = field(default_factory=list)
     permissions: frozenset[str] = frozenset()
     preferences: dict = field(default_factory=dict)
+    step_up_at: datetime | None = None
 
     def can(self, permission: str) -> bool:
         return permission in self.permissions
@@ -137,6 +139,7 @@ def optional_principal(
             roles=rbac.user_role_keys(s, user.id),
             permissions=frozenset(perms),
             preferences=dict(user.preferences),
+            step_up_at=active.session.step_up_at,
         )
 
 
@@ -153,6 +156,22 @@ def require(permission: str):
     def _check(p: Annotated[Principal, Depends(principal)]) -> Principal:
         if not p.can(permission):
             raise HTTPException(status_code=403, detail="forbidden")
+        return p
+
+    return _check
+
+
+STEP_UP_VALID = timedelta(minutes=10)
+
+
+def require_step_up(permission: str):
+    """Like require(), and the user must have re-confirmed (2FA code, or password without
+    2FA) within the last 10 minutes. The client answers 403 step_up_required with
+    POST /api/v1/auth/step-up and retries."""
+
+    def _check(p: Annotated[Principal, Depends(require(permission))]) -> Principal:
+        if p.step_up_at is None or datetime.now(UTC) - p.step_up_at > STEP_UP_VALID:
+            raise HTTPException(status_code=403, detail="step_up_required")
         return p
 
     return _check

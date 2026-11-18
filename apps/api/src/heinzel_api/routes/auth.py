@@ -22,9 +22,11 @@ from heinzel_api import audit, identity, ratelimit, rbac
 from heinzel_api.db import tenant_session
 from heinzel_api.deps import (
     SESSION_COOKIE,
+    STEP_UP_VALID,
     DbDep,
     OptionalPrincipalDep,
     Principal,
+    PrincipalDep,
     TenantContext,
     TenantDep,
     client_ip,
@@ -49,6 +51,16 @@ class CodeIn(BaseModel):
 
 class StepOut(BaseModel):
     next: Next
+
+
+class StepUpIn(BaseModel):
+    # TOTP code for users with 2FA, otherwise the password.
+    code: str | None = Field(default=None, min_length=6, max_length=8)
+    password: str | None = Field(default=None, max_length=1024)
+
+
+class StepUpOut(BaseModel):
+    valid_until: datetime
 
 
 class MfaSetupOut(BaseModel):
@@ -241,6 +253,40 @@ def mfa_confirm(
     if not ok:
         raise HTTPException(status_code=401, detail="invalid_code")
     return StepOut(next="done")
+
+
+@router.post("/step-up", response_model=StepUpOut)
+def step_up(
+    body: StepUpIn, request: Request, tenant: TenantDep, db: DbDep, p: PrincipalDep
+) -> StepUpOut:
+    """Re-confirm for sensitive actions (role changes). Valid for 10 minutes."""
+    rate_limit(request, ratelimit.LOGIN, tenant.config.slug)
+    ok = False
+    with tenant_session(db, tenant.id) as s:
+        user = s.get(User, p.user_id)
+        row = s.get(UserSession, p.session_id)
+        assert user is not None and row is not None
+        if user.mfa_enabled:
+            ok = bool(body.code) and identity.verify_totp(
+                user, body.code or "", request.app.state.settings.secret_key
+            )
+        else:
+            ok = bool(body.password) and identity.verify_password(user, body.password or "")
+        if ok:
+            row.step_up_at = datetime.now(UTC)
+            valid_until = row.step_up_at + STEP_UP_VALID
+        else:
+            identity.second_factor_failed(s, user, tenant.policy)
+        audit.record(
+            s,
+            tenant.id,
+            "auth.step_up" if ok else "auth.step_up_failed",
+            actor_user_id=user.id,
+            ip=client_ip(request),
+        )
+    if not ok:
+        raise HTTPException(status_code=401, detail="invalid_code")
+    return StepUpOut(valid_until=valid_until)
 
 
 @router.post("/logout", status_code=204)

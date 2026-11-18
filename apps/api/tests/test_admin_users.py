@@ -1,7 +1,7 @@
 """Benutzer & Rollen: invitations, deactivation, MFA reset, role changes and their guard rails."""
 
 import pytest
-from _flows import enrol, link_token, login
+from _flows import enrol, link_token, login, step_up
 from _support import PASSWORD
 
 pytestmark = pytest.mark.usefixtures("seeded")
@@ -10,8 +10,9 @@ pytestmark = pytest.mark.usefixtures("seeded")
 @pytest.fixture
 def admin(api, make_user):
     email = make_user(roles=("admin",))
-    enrol(api, email)
+    totp = enrol(api, email)
     me = api.get("/api/v1/me").json()
+    me["totp"] = totp
     return me
 
 
@@ -119,6 +120,9 @@ def test_roles_change_and_last_admin_guard(api, admin, make_user):
     uid = other.get("/api/v1/me").json()["id"]
 
     r = api.put(f"/api/v1/admin/users/{uid}/roles", json={"roles": ["staff", "admin"]})
+    assert r.status_code == 403 and r.json()["detail"] == "step_up_required"
+    step_up(api, admin["totp"])
+    r = api.put(f"/api/v1/admin/users/{uid}/roles", json={"roles": ["staff", "admin"]})
     assert r.status_code == 200 and r.json()["roles"] == ["admin", "staff"]
     assert api.put(f"/api/v1/admin/users/{uid}/roles", json={"roles": ["nope"]}).status_code == 422
     # now two admins: removing one is fine
@@ -132,7 +136,8 @@ def test_last_admin_cannot_lose_admin_role(api, owner_engine, make_user):
 
     # isolate: deactivate every other admin of the shared test tenant first
     email = make_user(roles=("admin",))
-    enrol(api, email)
+    totp = enrol(api, email)
+    step_up(api, totp)
     me = api.get("/api/v1/me").json()
     with owner_engine.begin() as c:
         tid = c.execute(text("select id from core.tenant where slug = 'schmelzi'")).scalar_one()

@@ -4,6 +4,7 @@
 	import { post } from '#lib/api.ts';
 	import Icon from '#lib/components/Icon.svelte';
 	import Leprechaun from '#lib/components/Leprechaun.svelte';
+	import StepUpDialog from '#lib/components/StepUpDialog.svelte';
 	import { theme, toggleTheme } from '#lib/theme.svelte.ts';
 	import type { LayoutProps } from './$types';
 
@@ -89,6 +90,7 @@
 	<main class="main">
 		{@render children()}
 	</main>
+	<StepUpDialog mfa={user?.mfa_enabled ?? false} />
 </div>
 
 <style>

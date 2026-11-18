@@ -20,6 +20,11 @@ export const ACTION_LABELS: Record<string, string> = {
 	'user.mfa_reset': '2FA zurückgesetzt',
 	'user.roles_changed': 'Rollen geändert',
 	'user.preferences_changed': 'Persönliche Einstellungen geändert',
+	'auth.step_up': 'Änderung mit 2FA bestätigt',
+	'auth.step_up_failed': 'Bestätigung fehlgeschlagen',
+	'role.created': 'Rolle angelegt',
+	'role.updated': 'Rolle geändert',
+	'role.deleted': 'Rolle gelöscht',
 	'tenant.registered': 'Mandant eingerichtet',
 	'audit.exported': 'Audit-Log exportiert'
 };

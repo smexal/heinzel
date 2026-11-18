@@ -12,7 +12,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from heinzel_api.manifests import Manifest
-from heinzel_api.models import Role, RoleAssignment, RolePermission
+from heinzel_api.models import PermissionSeeded, Role, RoleAssignment, RolePermission
 
 WILDCARD = "*"
 
@@ -47,8 +47,14 @@ def defaults_for(role_key: str, manifests: dict[str, Manifest]) -> set[str]:
 def ensure_system_roles(
     session: Session, tenant_id: UUID, manifests: dict[str, Manifest]
 ) -> dict[str, Role]:
-    """Create missing system roles. Existing roles keep the permissions an admin gave them,
-    but newly installed module defaults are added."""
+    """Create missing system roles and apply manifest defaults for permissions this tenant
+    has not seen yet (a newly installed module). Permissions an admin removed later stay
+    removed: each default is applied once per tenant."""
+    seen = set(
+        session.scalars(
+            select(PermissionSeeded.permission).where(PermissionSeeded.tenant_id == tenant_id)
+        )
+    )
     roles: dict[str, Role] = {}
     for key, meta in SYSTEM_ROLES.items():
         role = session.scalar(select(Role).where(Role.tenant_id == tenant_id, Role.key == key))
@@ -61,9 +67,11 @@ def ensure_system_roles(
                 select(RolePermission.permission).where(RolePermission.role_id == role.id)
             )
         )
-        for perm in sorted(defaults_for(key, manifests) - have):
+        for perm in sorted(defaults_for(key, manifests) - have - seen):
             session.add(RolePermission(tenant_id=tenant_id, role_id=role.id, permission=perm))
         roles[key] = role
+    for perm in sorted(set(catalogue(manifests)) - seen):
+        session.add(PermissionSeeded(tenant_id=tenant_id, permission=perm))
     session.flush()
     return roles
 

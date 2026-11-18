@@ -134,6 +134,15 @@ def second_factor_failed(session: Session, user: User, policy: LocalIdentity) ->
     return False
 
 
+def verify_password(user: User, password: str) -> bool:
+    if user.password_hash is None:
+        return False
+    try:
+        return _hasher.verify(user.password_hash, password)
+    except (VerificationError, InvalidHashError):
+        return False
+
+
 def mfa_required(user: User, policy: LocalIdentity, is_admin: bool) -> bool:
     if user.mfa_enabled:
         return True

@@ -42,8 +42,10 @@ policies show and accept only that tenant's rows. Migrations of new tenant table
 | `GET /api/v1/admin/users` | users with roles, MFA state, last login (`core.users.manage`) |
 | `POST /api/v1/admin/users` | invite (mail with a 7-day link) |
 | `POST /api/v1/admin/users/{id}/invite \| deactivate \| activate \| mfa-reset` | |
-| `PUT /api/v1/admin/users/{id}/roles` | replace role assignments |
+| `PUT /api/v1/admin/users/{id}/roles` | replace role assignments (step-up) |
 | `GET /api/v1/me/preferences`, `PUT …` | language and regional settings: own values, tenant defaults, locks, options |
 | `GET /api/v1/admin/audit` | events, newest first; filters `q, actor, channel, area, since`; paging `before_id`; chain status (`core.audit.read`) |
 | `GET /api/v1/admin/audit/export.csv` | same filters as CSV (`;`, UTF-8 with BOM); the export is audited |
+| `POST /api/v1/auth/step-up` | re-confirm with TOTP (or password without 2FA) for 10 minutes |
+| `POST /api/v1/admin/roles`, `PUT/DELETE …/{key}` | custom roles (`core.roles.manage`, step-up) |
 | `GET /api/v1/admin/roles` | roles with expanded permissions and the permission catalogue |

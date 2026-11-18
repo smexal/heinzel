@@ -153,6 +153,8 @@ class UserSession(Base):
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     # False until the second factor is passed (or set up, when MFA is required).
     mfa_passed: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    # Last time the user re-confirmed (TOTP or password) for a sensitive action.
+    step_up_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _created()
     last_seen_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -204,6 +206,18 @@ class ActionToken(Base):
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class PermissionSeeded(Base):
+    """A manifest permission whose default roles were applied for this tenant."""
+
+    __tablename__ = "permission_seeded"
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenant.id", ondelete="CASCADE"), primary_key=True
+    )
+    permission: Mapped[str] = mapped_column(String(120), primary_key=True)
+    seeded_at: Mapped[datetime] = _created()
+
+
 TENANT_TABLES = [
     "app_user",
     "role",
@@ -212,4 +226,5 @@ TENANT_TABLES = [
     "session",
     "audit_event",
     "action_token",
+    "permission_seeded",
 ]

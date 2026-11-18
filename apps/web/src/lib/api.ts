@@ -22,7 +22,7 @@ export function put<T>(path: string, body?: unknown): Promise<T> {
 	return send<T>('PUT', path, body);
 }
 
-async function send<T>(method: string, path: string, body?: unknown): Promise<T> {
+export async function send<T>(method: string, path: string, body?: unknown): Promise<T> {
 	const res = await fetch(`/api/v1${path}`, {
 		method,
 		headers: body === undefined ? {} : { 'content-type': 'application/json' },

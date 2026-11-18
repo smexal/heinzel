@@ -27,6 +27,7 @@ export type ShellUser = {
 	display_name: string;
 	email: string;
 	initials: string;
+	mfa_enabled: boolean;
 	localization: Localization;
 };
 

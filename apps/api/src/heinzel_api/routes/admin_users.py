@@ -6,13 +6,15 @@ Guard rails:
 - Administrators cannot deactivate themselves.
 """
 
+import re
+import unicodedata
 from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -27,12 +29,18 @@ from heinzel_api.deps import (
     client_ip,
     public_url,
     require,
+    require_step_up,
 )
 from heinzel_api.models import ActionToken, Role, RoleAssignment, RolePermission, User
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
 UsersAdmin = Annotated[Principal, Depends(require("core.users.manage"))]
+# Changing who holds which permissions needs a fresh second factor (design: "bestätigst du
+# erneut mit 2FA").
+RoleAssigner = Annotated[Principal, Depends(require_step_up("core.users.manage"))]
+RolesEditor = Annotated[Principal, Depends(require_step_up("core.roles.manage"))]
+RolesReader = Annotated[Principal, Depends(require("core.users.manage"))]
 
 
 class UserOut(BaseModel):
@@ -305,7 +313,7 @@ def set_user_roles(
     user_id: UUID,
     body: RolesIn,
     request: Request,
-    actor: UsersAdmin,
+    actor: RoleAssigner,
     tenant: TenantDep,
     db: DbDep,
     manifests: ManifestsDep,
@@ -338,12 +346,183 @@ def set_user_roles(
         return _user_out(s, user)
 
 
-# --- roles (read-only for now) ------------------------------------------------------------
+# --- roles --------------------------------------------------------------------------------
+
+
+class RoleIn(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=500)
+    permissions: list[str] = []
+
+
+def _slug(name: str) -> str:
+    ascii_name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
+    slug = re.sub(r"[^a-z0-9]+", "-", ascii_name.lower()).strip("-")
+    return (slug or "rolle")[:50]
+
+
+def _check_permissions(wanted: set[str], before: set[str], actor: Principal, manifests) -> None:
+    known = set(rbac.catalogue(manifests))
+    if not wanted <= known:
+        raise HTTPException(status_code=422, detail="unknown_permission")
+    if not (wanted ^ before) <= actor.permissions:
+        raise HTTPException(status_code=403, detail="role_exceeds_own_permissions")
+
+
+def _set_permissions(s: Session, tenant_id: UUID, role: Role, wanted: set[str]) -> None:
+    current = set(
+        s.scalars(select(RolePermission.permission).where(RolePermission.role_id == role.id))
+    )
+    if current - wanted:
+        s.execute(
+            delete(RolePermission).where(
+                RolePermission.role_id == role.id,
+                RolePermission.permission.in_(current - wanted),
+            )
+        )
+    for perm in sorted(wanted - current):
+        s.add(RolePermission(tenant_id=tenant_id, role_id=role.id, permission=perm))
+    s.flush()
+
+
+def _role_out(s: Session, role: Role, manifests) -> RoleOut:
+    members = s.scalar(
+        select(func.count())
+        .select_from(RoleAssignment)
+        .join(User, User.id == RoleAssignment.user_id)
+        .where(RoleAssignment.role_id == role.id, User.status != "deactivated")
+    )
+    return RoleOut(
+        key=role.key,
+        name=role.name,
+        description=role.description,
+        is_system=role.is_system,
+        permissions=sorted(_role_permissions(s, role, manifests)),
+        members=members or 0,
+    )
+
+
+@router.post("/roles", response_model=RoleOut, status_code=201)
+def create_role(
+    body: RoleIn,
+    request: Request,
+    actor: RolesEditor,
+    tenant: TenantDep,
+    db: DbDep,
+    manifests: ManifestsDep,
+) -> RoleOut:
+    wanted = set(body.permissions)
+    _check_permissions(wanted, set(), actor, manifests)
+    with tenant_session(db, tenant.id) as s:
+        base = _slug(body.name)
+        key, n = base, 2
+        existing = set(s.scalars(select(Role.key)))
+        while key in existing or key in rbac.SYSTEM_ROLES:
+            key, n = f"{base}-{n}", n + 1
+        role = Role(
+            tenant_id=tenant.id,
+            key=key,
+            name=body.name.strip(),
+            description=(body.description or "").strip() or None,
+        )
+        s.add(role)
+        s.flush()
+        _set_permissions(s, tenant.id, role, wanted)
+        audit.record(
+            s,
+            tenant.id,
+            "role.created",
+            actor_user_id=actor.user_id,
+            target_type="role",
+            target_id=key,
+            data={"name": role.name, "permissions": sorted(wanted)},
+            ip=client_ip(request),
+        )
+        return _role_out(s, role, manifests)
+
+
+@router.put("/roles/{key}", response_model=RoleOut)
+def update_role(
+    key: str,
+    body: RoleIn,
+    request: Request,
+    actor: RolesEditor,
+    tenant: TenantDep,
+    db: DbDep,
+    manifests: ManifestsDep,
+) -> RoleOut:
+    """Custom roles: name, description, permissions. System roles: only the permissions
+    of "staff"; "admin" always holds everything."""
+    with tenant_session(db, tenant.id) as s:
+        role = s.scalar(select(Role).where(Role.key == key))
+        if role is None:
+            raise HTTPException(status_code=404, detail="role_not_found")
+        if role.key == "admin":
+            raise HTTPException(status_code=409, detail="admin_role_fixed")
+        before = _role_permissions(s, role, manifests)
+        wanted = set(body.permissions)
+        _check_permissions(wanted, before, actor, manifests)
+        changes: dict = {}
+        if not role.is_system:
+            name = body.name.strip()
+            desc = (body.description or "").strip() or None
+            if name != role.name:
+                changes["name"] = [role.name, name]
+                role.name = name
+            if desc != role.description:
+                changes["description"] = [role.description, desc]
+                role.description = desc
+        if wanted != before:
+            changes["added"] = sorted(wanted - before)
+            changes["removed"] = sorted(before - wanted)
+            _set_permissions(s, tenant.id, role, wanted)
+        if changes:
+            audit.record(
+                s,
+                tenant.id,
+                "role.updated",
+                actor_user_id=actor.user_id,
+                target_type="role",
+                target_id=role.key,
+                data=changes,
+                ip=client_ip(request),
+            )
+        return _role_out(s, role, manifests)
+
+
+@router.delete("/roles/{key}", status_code=204)
+def delete_role(
+    key: str, request: Request, actor: RolesEditor, tenant: TenantDep, db: DbDep
+) -> None:
+    with tenant_session(db, tenant.id) as s:
+        role = s.scalar(select(Role).where(Role.key == key))
+        if role is None:
+            raise HTTPException(status_code=404, detail="role_not_found")
+        if role.is_system:
+            raise HTTPException(status_code=409, detail="system_role")
+        assigned = s.scalar(
+            select(func.count())
+            .select_from(RoleAssignment)
+            .where(RoleAssignment.role_id == role.id)
+        )
+        if assigned:
+            raise HTTPException(status_code=409, detail="role_in_use")
+        audit.record(
+            s,
+            tenant.id,
+            "role.deleted",
+            actor_user_id=actor.user_id,
+            target_type="role",
+            target_id=role.key,
+            data={"name": role.name},
+            ip=client_ip(request),
+        )
+        s.delete(role)
 
 
 @router.get("/roles", response_model=RolesOut)
 def list_roles(
-    actor: UsersAdmin, tenant: TenantDep, db: DbDep, manifests: ManifestsDep
+    actor: RolesReader, tenant: TenantDep, db: DbDep, manifests: ManifestsDep
 ) -> RolesOut:
     catalogue = rbac.catalogue(manifests)
 
