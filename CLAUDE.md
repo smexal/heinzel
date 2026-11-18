@@ -42,16 +42,16 @@ modules/<id>    module manifest, settings schema, later api/ code
 tenants/<slug>  tenant config and assets (dev seed; later stored in the database)
 packages/       shared code once needed (ui, sdk)
 docs/           concept snapshots
+deploy/         Caddyfile for the local full stack (production proxy config follows)
+scripts/dev.mjs the `pnpm dev` runner
 ```
 
 ## Commands
 
 ```bash
-docker compose up -d                       # postgres, valkey, mailpit
-cd apps/api && uv sync && uv run heinzel migrate && uv run heinzel seed-tenants
-uv run heinzel create-admin --tenant schmelzi --email ... --name "..."
-uv run uvicorn heinzel_api.main:app --reload --port 8000
-pnpm install && pnpm dev:web               # http://localhost:5173
+pnpm dev                                   # infra in Docker, migrate + seed, API :8000 + web :5173 with reload
+pnpm stack                                 # whole stack in Docker behind Caddy on :8080
+cd apps/api && uv run heinzel create-admin --tenant schmelzi --email ... --name "..."
 cd apps/api && uv run pytest -q && uv run ruff check . && uv run ruff format --check .   # pytest needs Postgres
 pnpm check:web && pnpm build:web
 ```

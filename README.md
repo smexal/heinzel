@@ -14,27 +14,31 @@ and get administrative work done. First tenant: Stiftung Schmelzi.
 
 ## Run locally
 
+Two ways, both from the repository root:
+
+| | Command | Open | When |
+| --- | --- | --- | --- |
+| Development | `pnpm dev` | http://localhost:5173 | Coding: API and web on your machine with hot reload, Postgres/Valkey/Mailpit in Docker |
+| Full stack | `pnpm stack` (`docker compose up -d --build`) | http://localhost:8080 | Trying it out or demoing: everything in containers behind a Caddy proxy, like production |
+
+`pnpm dev` creates `.env` from `.env.example` if missing, starts the containers, runs
+`uv sync`, the migrations and `seed-tenants`, then starts API and web with prefixed output.
+Ctrl+C stops API and web; the containers keep running (`docker compose stop` ends them).
+Use `pnpm dev --no-docker` if Postgres, Valkey and Mailpit run elsewhere.
+
+The full stack runs migrations and `seed-tenants` in a one-off `migrate` container before the API
+starts. `pnpm stack:down` stops it; add `-v` to `docker compose down` to drop the database.
+
+**First administrator** (once per database), then sign in and set up two-factor:
+
 ```bash
-cp .env.example .env
-docker compose up -d
-
-# API on http://localhost:8000 (OpenAPI UI at /docs)
-cd apps/api
-uv sync
-uv run heinzel migrate          # first time and after every pull with new migrations
-uv run heinzel seed-tenants     # registers tenants/<slug> in the database
-uv run heinzel create-admin --tenant schmelzi --email you@schmelzi.ch --name "Vorname Name"
-uv run uvicorn heinzel_api.main:app --reload --port 8000
-
-# Web on http://localhost:5173 (second terminal, repo root)
-pnpm install
-pnpm dev:web
+# pnpm dev
+cd apps/api && uv run heinzel create-admin --tenant schmelzi --email you@schmelzi.ch --name "Vorname Name"
+# pnpm stack
+docker compose exec api heinzel create-admin --tenant schmelzi --email you@schmelzi.ch --name "Vorname Name"
 ```
 
-Open http://localhost:5173 and sign in. On the first login you set up the second factor with an
-authenticator app (Microsoft Authenticator, Google Authenticator, 1Password, ...).
-
-Mail sent in dev is caught by Mailpit: http://localhost:8025
+Mail sent in dev (invitations, password reset) is caught by Mailpit: http://localhost:8025
 
 ## Checks
 

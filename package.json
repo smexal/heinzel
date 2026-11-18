@@ -2,10 +2,13 @@
 	"name": "heinzel",
 	"private": true,
 	"scripts": {
+		"dev": "node scripts/dev.mjs",
 		"dev:web": "pnpm --filter web dev",
 		"build:web": "pnpm --filter web build",
 		"check:web": "pnpm --filter web check",
-		"format": "pnpm --filter web format"
+		"format": "pnpm --filter web format",
+		"stack": "docker compose up -d --build",
+		"stack:down": "docker compose down"
 	},
 	"engines": {
 		"node": ">=22.17"

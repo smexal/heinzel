@@ -31,7 +31,7 @@ def create_app(
         app.state.tenants = load_tenants(settings.tenants_dir)
         app.state.tenant_ids = {}
         app.state.db = make_sessionmaker(settings.database_url)
-        app.state.mailer = mailer or SmtpMailer()
+        app.state.mailer = mailer or SmtpMailer(settings.smtp_host_override)
         app.state.ratelimiter = ratelimiter or ValkeyRateLimiter(settings.valkey_url)
         yield
 

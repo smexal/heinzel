@@ -1,7 +1,23 @@
-# Local infrastructure for development. API and web run on the host (see README).
+# Heinzel, local.
+#
+#   docker compose up -d --build        whole stack on http://localhost:8080
+#   pnpm dev                            infrastructure in Docker, API and web on the host
+#                                       with hot reload (http://localhost:5173)
+#
+# First administrator (full stack):
+#   docker compose exec api heinzel create-admin --tenant schmelzi --email ... --name "..."
 name: heinzel
 
+x-api-env: &api-env
+  HEINZEL_ENV: dev
+  HEINZEL_DATABASE_URL: postgresql+psycopg://heinzel_app:heinzel_app@postgres:5432/heinzel
+  HEINZEL_MIGRATION_DATABASE_URL: postgresql+psycopg://heinzel:heinzel@postgres:5432/heinzel
+  HEINZEL_VALKEY_URL: redis://valkey:6379/0
+  # tenant.json points SMTP at localhost:1025; inside the stack Mailpit is "mailpit".
+  HEINZEL_SMTP_HOST_OVERRIDE: mailpit
+
 services:
+  # --- infrastructure (also used by `pnpm dev`) -------------------------------------------
   postgres:
     image: postgres:17-alpine
     environment:
@@ -18,11 +34,49 @@ services:
   valkey:
     image: valkey/valkey:8-alpine
     ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      retries: 10
 
   mailpit:
     # Catches all outgoing mail in dev: SMTP on 1025, web UI on http://localhost:8025
     image: axllent/mailpit
     ports: ["1025:1025", "8025:8025"]
+
+  # --- application ------------------------------------------------------------------------
+  migrate:
+    # Runs once per `up`: migrations, then registers tenants/<slug> and their system roles.
+    build: { context: ., dockerfile: apps/api/Dockerfile }
+    environment: *api-env
+    command: ["sh", "-c", "heinzel migrate && heinzel seed-tenants"]
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: "no"
+
+  api:
+    build: { context: ., dockerfile: apps/api/Dockerfile }
+    environment: *api-env
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      valkey: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 5s
+      retries: 10
+
+  web:
+    build: { context: ., dockerfile: apps/web/Dockerfile }
+    environment:
+      API_URL: http://api:8000
+    depends_on:
+      api: { condition: service_healthy }
+
+  proxy:
+    image: caddy:2-alpine
+    ports: ["8080:80"]
+    volumes: [./deploy/Caddyfile:/etc/caddy/Caddyfile:ro]
+    depends_on: [web, api]
 
 volumes:
   pgdata:

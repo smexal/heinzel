@@ -40,6 +40,9 @@ def _password(ref: str | None) -> str | None:
 
 
 class SmtpMailer(Mailer):
+    def __init__(self, host_override: str | None = None):
+        self._host_override = host_override
+
     def send(self, tenant: TenantConfig, mail: Mail) -> bool:
         cfg = (tenant.model_extra or {}).get("email") or {}
         smtp = cfg.get("smtp") or {}
@@ -51,7 +54,8 @@ class SmtpMailer(Mailer):
         if cfg.get("reply_to"):
             msg["Reply-To"] = cfg["reply_to"]
         msg.set_content(mail.text)
-        host, port = smtp.get("host", "localhost"), int(smtp.get("port", 25))
+        host = self._host_override or smtp.get("host", "localhost")
+        port = int(smtp.get("port", 25))
         security = smtp.get("security", "starttls")
         try:
             if security == "tls":

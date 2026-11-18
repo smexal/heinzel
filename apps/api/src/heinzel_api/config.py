@@ -24,7 +24,9 @@ class Settings(BaseSettings):
     app_db_password: str = "heinzel_app"
     # Encrypts secrets at rest (TOTP seeds). Must be set outside dev.
     secret_key: str = "dev-only-insecure-secret-key-change-me"
-    public_base_url: str = "http://localhost:5173"
+    # Dev only: send mail to this SMTP host instead of the one in tenant.json
+    # (in the Docker stack Mailpit is "mailpit", not localhost).
+    smtp_host_override: str | None = None
     valkey_url: str = "redis://localhost:6379/0"
     tenants_dir: Path = REPO_ROOT / "tenants"
     modules_dir: Path = REPO_ROOT / "modules"
