@@ -6,6 +6,7 @@ attachments, but not delete or move the task. Every write is audited and keeps t
 and Mein Eingang current in the same transaction.
 """
 
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
@@ -52,6 +53,14 @@ class Actor:
     channel: str = "web"
     ip: str | None = None
     can_share: bool = False
+
+
+def plain(markdown: str) -> str:
+    """Note text without Markdown markers, for search and snippets."""
+    text = re.sub(r"\[([^\]\n]+)\]\(([^)\s]+)\)", r"\1", markdown or "")
+    text = re.sub(r"(\*\*|__|~~|`)", "", text)
+    text = re.sub(r"(?<![\w*])\*(?=\S)([^*\n]*?\S)\*(?!\w)", r"\1", text)
+    return re.sub(r"(?m)^\s*(#{1,3}|[-*+](\s\[[ xX]\])?|\d{1,3}[.)]|&gt;|>)\s+", "", text)
 
 
 def today_in(tz: str) -> date:
@@ -726,7 +735,7 @@ def index_task(s: Session, actor: Actor, task: Task, lst: TaskList) -> None:
         entity_type="task",
         entity_id=str(task.id),
         title=task.title,
-        body="\n".join([task.note, *(i.text for i in check_items(s, task.id))]).strip(),
+        body="\n".join([plain(task.note), *(i.text for i in check_items(s, task.id))]).strip(),
         meta=meta,
         link=f"/aufgaben?aufgabe={task.id}",
         permission=USE,

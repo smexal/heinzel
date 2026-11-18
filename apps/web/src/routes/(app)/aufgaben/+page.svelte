@@ -5,6 +5,7 @@
 	import { ApiError, post, send } from '#lib/api.ts';
 	import { formatter } from '#lib/format.ts';
 	import Icon from '#lib/components/Icon.svelte';
+	import MarkdownNote from '#lib/components/MarkdownNote.svelte';
 	import Attachments from './Attachments.svelte';
 	import Checklist from './Checklist.svelte';
 	import ListsDialog from './ListsDialog.svelte';
@@ -117,12 +118,10 @@
 	let confirmDelete = $state(false);
 	// Editable copies of the selected task, re-taken whenever the loaded task changes.
 	let title = $state('');
-	let note = $state('');
 	$effect(() => {
 		const d = detail;
 		untrack(() => {
 			title = d?.title ?? '';
-			note = d?.note ?? '';
 			confirmDelete = false;
 		});
 	});
@@ -131,10 +130,6 @@
 		if (!detail) return;
 		if (title.trim() && title.trim() !== detail.title) patch(detail.id, { title });
 		else title = detail.title;
-	}
-
-	function saveNote() {
-		if (detail && note !== detail.note) patch(detail.id, { note });
 	}
 
 	const remove = (t: TaskDetail) =>
@@ -372,10 +367,9 @@
 						{/if}
 					</dl>
 
-					<label class="field">
-						<span>Notiz</span>
-						<textarea class="input note" rows="4" bind:value={note} onblur={saveNote}></textarea>
-					</label>
+					{#key detail.id}
+						<MarkdownNote value={detail.note} onsave={(note) => patch(detail.id, { note })} />
+					{/key}
 
 					<Checklist task={detail} {busy} {run} onfinish={() => toggle(detail)} />
 
@@ -460,7 +454,7 @@
 		align-items: flex-start;
 	}
 	.listcol {
-		flex: 1.6 1 460px;
+		flex: 1.3 1 440px;
 		min-width: 0;
 		display: flex;
 		flex-direction: column;
@@ -699,7 +693,7 @@
 		position: sticky;
 		top: 20px;
 		display: flex;
-		flex: 1 1 320px;
+		flex: 1.1 1 380px;
 		flex-direction: column;
 		min-width: 0;
 	}
@@ -778,13 +772,6 @@
 	.long {
 		color: var(--muted);
 		font-size: 13px;
-	}
-	.note {
-		min-height: 96px;
-		padding: 10px 12px;
-		font-size: 15px;
-		font-weight: 400;
-		resize: vertical;
 	}
 	.dfoot {
 		display: flex;

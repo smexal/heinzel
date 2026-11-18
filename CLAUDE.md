@@ -62,6 +62,7 @@ pnpm check:web && pnpm build:web
 - Swiss spelling (ss, not ß). Dates via the user's resolved preferences, never hardcoded formats.
 - API: `/api/v1/...`, Pydantic models for every request and response, ISO 8601 UTC timestamps.
 - Svelte: runes only (`$state`, `$derived`, `$props`), `#lib/...` imports, component-scoped CSS on tokens.
+- User text as HTML only through `renderMarkdown()` (`#lib/markdown.ts`); no other `{@html}` with user data.
 - Accessibility: real buttons/links/labels, 44 px touch targets, WCAG AA in light and dark.
 - Tests next to every feature: pytest for the API, `pnpm check` must stay green.
 - Database: schema `core` for the core, `mod_<id>` per module. Every tenant table gets
@@ -163,6 +164,8 @@ Phase 1 (core platform and admin console) is complete.
       reminders (inbox or inbox + e-mail), retention, hand-back on deactivation; Übersicht redesigned
 - [x] Aufgaben: checklists (tick, rename, reorder by drag or Alt+↑/↓, progress in the line and inbox) and
       attachments of all common formats (files service: pictures, PDF, OOXML, ODF, TXT/CSV; no macros, no archives)
+- [x] Notes with simple Markdown: `#lib/markdown.ts` (escapes first, then a fixed subset; safe for `{@html}`) and
+      `#lib/components/MarkdownNote.svelte` (formatted view, growing editor, toolbar); inbox bodies render it too
 
 Next, in this order:
 - [ ] MCP gateway (tools from manifests, respects permissions and `mcp_disabled`)

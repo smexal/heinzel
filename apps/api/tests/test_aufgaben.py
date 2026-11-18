@@ -366,3 +366,12 @@ def test_checklist(api, make_user):
     # completing the task leaves the points as they are
     done = owner.post(f"{A}/tasks/{tid}/complete").json()
     assert [c["done"] for c in done["checklist"]] == [False, True, False]
+
+
+def test_markdown_note_is_searchable_without_markers(api, make_user):
+    c = _client(api, make_user)
+    tag = uuid.uuid4().hex[:8]
+    _new(c, "Mit Notiz", note=f"# Ablauf\n- **{tag}** prüfen\n- [Doku](https://schmelzi.ch/doku)")
+    hit = c.get(f"/api/v1/search?q={tag}").json()["groups"][0]["items"][0]
+    assert hit["snippet"] and "**" not in hit["snippet"] and "#" not in hit["snippet"]
+    assert c.get(f"/api/v1/search?q={tag} doku").json()["total"] == 1

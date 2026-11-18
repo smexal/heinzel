@@ -3,6 +3,7 @@
 	import { page } from '$app/state';
 	import { ApiError, post } from '#lib/api.ts';
 	import { formatter } from '#lib/format.ts';
+	import { renderMarkdown } from '#lib/markdown.ts';
 	import type { InboxItem } from './+page.server.ts';
 	import type { PageProps } from './$types';
 
@@ -224,7 +225,7 @@
 								<dd>{i.reason}</dd>{/if}
 						</dl>
 					{/if}
-					{#if i.body}<p class="body">{i.body}</p>{/if}
+					{#if i.body}<div class="body">{@html renderMarkdown(i.body)}</div>{/if}
 					{#if i.attachments.length}
 						<div class="atts">
 							{#each i.attachments as a (a.id)}
@@ -490,11 +491,28 @@
 	dd {
 		margin: 0;
 	}
+	.body :global(p),
+	.body :global(ul),
+	.body :global(ol) {
+		margin: 0 0 8px;
+	}
+	.body :global(:last-child) {
+		margin-bottom: 0;
+	}
+	.body :global(ul),
+	.body :global(ol) {
+		padding-left: 22px;
+	}
+	.body :global(ul) {
+		list-style: disc;
+	}
+	.body :global(ol) {
+		list-style: decimal;
+	}
 	.body {
 		margin: 0;
 		font-size: 15px;
 		line-height: 1.55;
-		white-space: pre-line;
 	}
 	.atts {
 		display: grid;
