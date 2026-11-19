@@ -23,6 +23,8 @@
 	let people = $state<Person[]>([]);
 	let confirmDelete = $state(false);
 	let busy = $state(false);
+	let searching = $state(false);
+	let loadingMembers = $state(false);
 	let error = $state('');
 
 	const shared = $derived(lists.lists.filter((l) => l.kind === 'shared'));
@@ -52,10 +54,13 @@
 	});
 
 	async function loadMembers(id: string) {
+		loadingMembers = true;
 		try {
 			members = await get<Member[]>(`/aufgaben/lists/${id}/members`);
 		} catch {
 			members = [];
+		} finally {
+			loadingMembers = false;
 		}
 	}
 
@@ -67,11 +72,14 @@
 			return;
 		}
 		const t = setTimeout(async () => {
+			searching = true;
 			try {
 				const found = await get<Person[]>(`/aufgaben/people?q=${encodeURIComponent(q)}`);
 				people = found.filter((p) => !members.some((m) => m.id === p.id));
 			} catch {
 				people = [];
+			} finally {
+				searching = false;
 			}
 		}, 200);
 		return () => clearTimeout(t);
@@ -84,8 +92,12 @@
 		name_required: 'Gib der Liste einen Namen.'
 	};
 
-	async function act(fn: () => Promise<unknown>) {
+	// The running action, for its spinner: "create", "rename", "add:<id>", "remove:<id>", "delete"
+	let busyKey = $state<string | null>(null);
+
+	async function act(fn: () => Promise<unknown>, key: string) {
 		busy = true;
+		busyKey = key;
 		error = '';
 		try {
 			await fn();
@@ -95,6 +107,7 @@
 			error = MESSAGES[d] ?? 'Das hat nicht geklappt. Bitte versuche es erneut.';
 		} finally {
 			busy = false;
+			busyKey = null;
 		}
 	}
 
@@ -106,13 +119,13 @@
 			const lst = await post<{ id: string }>('/aufgaben/lists', { name });
 			newName = '';
 			selected = lst.id;
-		});
+		}, 'create');
 	}
 
 	function saveName(e: SubmitEvent) {
 		e.preventDefault();
 		if (!current || !rename.trim() || rename.trim() === current.name) return;
-		act(() => put(`/aufgaben/lists/${current.id}`, { name: rename }));
+		act(() => put(`/aufgaben/lists/${current.id}`, { name: rename }), 'rename');
 	}
 
 	const addMember = (p: Person) =>
@@ -120,7 +133,7 @@
 			await post(`/aufgaben/lists/${current!.id}/members`, { user_id: p.id });
 			query = '';
 			await loadMembers(current!.id);
-		});
+		}, `add:${p.id}`);
 
 	const removeMember = (m: Member) =>
 		act(async () => {
@@ -129,7 +142,7 @@
 				selected = null;
 				if (page.url.searchParams.get('liste')) await goto('/aufgaben', { replace: true });
 			} else await loadMembers(current!.id);
-		});
+		}, `remove:${m.id}`);
 
 	const removeList = () =>
 		act(async () => {
@@ -137,7 +150,7 @@
 			await send('DELETE', `/aufgaben/lists/${id}`);
 			selected = null;
 			if (page.url.searchParams.get('liste') === id) await goto('/aufgaben', { replace: true });
-		});
+		}, 'delete');
 </script>
 
 <dialog
@@ -174,8 +187,11 @@
 					maxlength="80"
 					bind:value={newName}
 				/>
-				<button class="btn btn-primary" type="submit" disabled={busy || !newName.trim()}
-					>Erstellen</button
+				<button
+					class="btn btn-primary"
+					type="submit"
+					disabled={busy || !newName.trim()}
+					aria-busy={busyKey === 'create'}>Erstellen</button
 				>
 			</form>
 		{/if}
@@ -209,12 +225,16 @@
 											class="btn btn-secondary"
 											type="submit"
 											disabled={busy || !rename.trim() || rename.trim() === current.name}
-											>Umbenennen</button
+											aria-busy={busyKey === 'rename'}>Umbenennen</button
 										>
 									</form>
 								{/if}
 
-								<h3>Mitglieder</h3>
+								<h3>
+									Mitglieder{#if loadingMembers && !members.length}
+										<span class="spinner small-spin" role="status" aria-label="Wird geladen"
+										></span>{/if}
+								</h3>
 								<ul class="members">
 									{#each members as m (m.id)}
 										<li>
@@ -229,6 +249,7 @@
 													class="btn btn-link"
 													type="button"
 													disabled={busy}
+													aria-busy={busyKey === `remove:${m.id}`}
 													onclick={() => removeMember(m)}
 													>{m.id === myId ? 'Liste verlassen' : 'Entfernen'}</button
 												>
@@ -259,10 +280,14 @@
 															onclick={() => addMember(p)}
 														>
 															<span class="av">{p.initials}</span>{p.display_name}
+															{#if busyKey === `add:${p.id}`}<span class="spinner small-spin"
+																></span>{/if}
 														</button>
 													</li>
 												{/each}
 											</ul>
+										{:else if searching}
+											<p class="hint"><span class="spinner small-spin"></span> Suche …</p>
 										{:else if query.trim()}
 											<p class="hint">Niemand gefunden.</p>
 										{/if}
@@ -274,8 +299,12 @@
 												«{current.name}» wird mit allen Aufgaben und Bildern gelöscht. Das lässt
 												sich nicht rückgängig machen.
 											</p>
-											<button class="btn btn-danger" type="button" onclick={removeList}
-												>Liste endgültig löschen</button
+											<button
+												class="btn btn-danger"
+												type="button"
+												disabled={busy}
+												aria-busy={busyKey === 'delete'}
+												onclick={removeList}>Liste endgültig löschen</button
 											>
 											<button
 												class="btn btn-link"
@@ -341,6 +370,12 @@
 		flex-direction: column;
 		gap: 16px;
 		padding: 18px 22px 22px;
+	}
+	.small-spin {
+		width: 14px;
+		height: 14px;
+		margin-left: 6px;
+		color: var(--primary);
 	}
 	.hint {
 		margin: 0;

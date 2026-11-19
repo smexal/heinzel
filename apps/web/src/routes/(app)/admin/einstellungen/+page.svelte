@@ -166,15 +166,26 @@
 	const assetUrl = (name: string | null) =>
 		name ? `${s.assets_base}${name.replace(/^assets\//, '')}` : null;
 
-	function uploadLogo(slot: string, input: HTMLInputElement) {
+	// Which logo is being uploaded or removed (for its spinner)
+	let logoBusy = $state<string | null>(null);
+
+	async function uploadLogo(slot: string, input: HTMLInputElement) {
 		const file = input.files?.[0];
 		input.value = '';
 		if (!file) return;
-		run(() => send('PUT', `/admin/settings/branding/logos/${slot}`, file), 'Logo gespeichert.');
+		logoBusy = slot;
+		await run(
+			() => send('PUT', `/admin/settings/branding/logos/${slot}`, file),
+			'Logo gespeichert.'
+		);
+		logoBusy = null;
 	}
 
-	const removeLogo = (slot: string) =>
-		run(() => send('DELETE', `/admin/settings/branding/logos/${slot}`), 'Logo entfernt.');
+	async function removeLogo(slot: string) {
+		logoBusy = slot;
+		await run(() => send('DELETE', `/admin/settings/branding/logos/${slot}`), 'Logo entfernt.');
+		logoBusy = null;
+	}
 
 	// --- localization ---------------------------------------------------------------------
 	const LOC_ROWS: { key: string; label: string; hint: string }[] = [
@@ -344,7 +355,9 @@
 				</div>
 			</div>
 			<div class="actions">
-				<button class="btn btn-primary" type="submit" disabled={busy}>Speichern</button>
+				<button class="btn btn-primary" type="submit" disabled={busy} aria-busy={busy}
+					>Speichern</button
+				>
 			</div>
 		</form>
 	{:else if tab === 'branding'}
@@ -364,8 +377,8 @@
 							<span class="logo-box" class:dark={l.slot === 'dark'}>
 								{#if url}<img src={url} alt={l.label} />{:else}<span class="none">Keins</span>{/if}
 							</span>
-							<label class="btn btn-secondary file">
-								{url ? 'Ersetzen' : 'Hochladen'}
+							<label class="btn btn-secondary file" aria-busy={logoBusy === l.slot}>
+								{logoBusy === l.slot ? 'Wird hochgeladen …' : url ? 'Ersetzen' : 'Hochladen'}
 								<input
 									type="file"
 									accept="image/svg+xml,image/png,image/webp"
@@ -439,7 +452,9 @@
 					</div>
 				</div>
 				<div class="actions">
-					<button class="btn btn-primary" type="submit" disabled={busy}>Speichern</button>
+					<button class="btn btn-primary" type="submit" disabled={busy} aria-busy={busy}
+						>Speichern</button
+					>
 				</div>
 			</form>
 			<aside class="side">
@@ -514,7 +529,9 @@
 				</section>
 			</aside>
 			<div class="actions">
-				<button class="btn btn-primary" type="submit" disabled={busy}>Speichern</button>
+				<button class="btn btn-primary" type="submit" disabled={busy} aria-busy={busy}
+					>Speichern</button
+				>
 			</div>
 		</form>
 	{:else if tab === 'navigation'}
@@ -597,7 +614,9 @@
 				</section>
 			</aside>
 			<div class="actions">
-				<button class="btn btn-primary" type="submit" disabled={busy}>Speichern</button>
+				<button class="btn btn-primary" type="submit" disabled={busy} aria-busy={busy}
+					>Speichern</button
+				>
 			</div>
 		</form>
 	{:else if tab === 'identity'}
@@ -700,7 +719,9 @@
 				</div>
 			</div>
 			<div class="actions">
-				<button class="btn btn-primary" type="submit" disabled={busy}>Speichern</button>
+				<button class="btn btn-primary" type="submit" disabled={busy} aria-busy={busy}
+					>Speichern</button
+				>
 			</div>
 		</form>
 	{:else}
@@ -802,9 +823,12 @@
 					class="btn btn-secondary"
 					type="button"
 					onclick={testMail}
-					disabled={testBusy || busy}>Test-E-Mail an mich senden</button
+					disabled={testBusy || busy}
+					aria-busy={testBusy}>Test-E-Mail an mich senden</button
 				>
-				<button class="btn btn-primary" type="submit" disabled={busy}>Speichern</button>
+				<button class="btn btn-primary" type="submit" disabled={busy} aria-busy={busy}
+					>Speichern</button
+				>
 			</div>
 		</form>
 	{/if}

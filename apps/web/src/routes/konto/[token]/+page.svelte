@@ -95,7 +95,9 @@
 				/>
 			</label>
 			{#if message}<p class="notice error" role="alert">{message}</p>{/if}
-			<button class="btn btn-primary" type="submit" disabled={busy}>Passwort speichern</button>
+			<button class="btn btn-primary" type="submit" disabled={busy} aria-busy={busy}
+				>Passwort speichern</button
+			>
 		</form>
 	{/if}
 </AuthCard>

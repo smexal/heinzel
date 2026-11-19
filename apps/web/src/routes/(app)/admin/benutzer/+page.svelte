@@ -68,8 +68,12 @@
 		unknown_permission: 'Eine Berechtigung gibt es nicht mehr. Lade die Seite neu.'
 	};
 
+	// An action from a menu or a closed dialog is running: a status line shows it.
+	let working = $state(false);
+
 	async function act(action: () => Promise<string>) {
 		notice = null;
+		working = true;
 		try {
 			notice = { tone: 'ok', text: await action() };
 			await invalidateAll();
@@ -80,6 +84,8 @@
 				tone: 'error',
 				text: ERRORS[detail] ?? 'Das hat nicht geklappt. Bitte versuche es erneut.'
 			};
+		} finally {
+			working = false;
 		}
 	}
 
@@ -275,11 +281,14 @@
 		roleDialog.showModal();
 	}
 
+	let roleBusy = $state<'save' | 'delete' | null>(null);
+
 	async function saveRole(e: SubmitEvent) {
 		e.preventDefault();
 		const r = editing;
 		const body = { name: r.name, description: r.description || null, permissions: r.permissions };
 		roleError = '';
+		roleBusy = 'save';
 		try {
 			await withStepUp(() =>
 				r.key ? put(`/admin/roles/${r.key}`, body) : post('/admin/roles', body)
@@ -294,6 +303,8 @@
 			if (err instanceof StepUpCancelled) return;
 			const d = err instanceof ApiError ? err.detail : '';
 			roleError = ERRORS[d] ?? 'Das hat nicht geklappt. Bitte versuche es erneut.';
+		} finally {
+			roleBusy = null;
 		}
 	}
 
@@ -301,6 +312,7 @@
 		const r = editing;
 		if (!r.key) return;
 		roleError = '';
+		roleBusy = 'delete';
 		try {
 			await withStepUp(() => send('DELETE', `/admin/roles/${r.key}`));
 			roleDialog.close();
@@ -310,6 +322,8 @@
 			if (err instanceof StepUpCancelled) return;
 			const d = err instanceof ApiError ? err.detail : '';
 			roleError = ERRORS[d] ?? 'Das hat nicht geklappt. Bitte versuche es erneut.';
+		} finally {
+			roleBusy = null;
 		}
 	}
 
@@ -367,7 +381,9 @@
 		>
 	</nav>
 
-	{#if notice}
+	{#if working}
+		<p class="notice working" role="status"><span class="spinner"></span> Wird ausgeführt …</p>
+	{:else if notice}
 		<p class="notice {notice.tone}" role="status">{notice.text}</p>
 	{/if}
 
@@ -586,7 +602,9 @@
 			<button class="btn btn-secondary" type="button" onclick={() => inviteDialog.close()}
 				>Abbrechen</button
 			>
-			<button class="btn btn-primary" type="submit" disabled={busy}>Einladung senden</button>
+			<button class="btn btn-primary" type="submit" disabled={busy} aria-busy={busy}
+				>Einladung senden</button
+			>
 		</div>
 	</form>
 </dialog>
@@ -670,7 +688,8 @@
 					class="btn btn-danger left"
 					type="button"
 					onclick={deleteRole}
-					disabled={editing.members > 0}
+					disabled={editing.members > 0 || !!roleBusy}
+					aria-busy={roleBusy === 'delete'}
 					title={editing.members > 0 ? 'Die Rolle ist noch Personen zugewiesen' : undefined}
 					>Rolle löschen</button
 				>
@@ -678,8 +697,11 @@
 			<button class="btn btn-secondary" type="button" onclick={() => roleDialog.close()}
 				>Abbrechen</button
 			>
-			<button class="btn btn-primary" type="submit"
-				>{editing.key ? 'Speichern' : 'Rolle anlegen'}</button
+			<button
+				class="btn btn-primary"
+				type="submit"
+				disabled={!!roleBusy}
+				aria-busy={roleBusy === 'save'}>{editing.key ? 'Speichern' : 'Rolle anlegen'}</button
 			>
 		</div>
 	</form>

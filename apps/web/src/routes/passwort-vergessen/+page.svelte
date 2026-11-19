@@ -56,7 +56,9 @@
 				/>
 			</label>
 			{#if message}<p class="notice error" role="alert">{message}</p>{/if}
-			<button class="btn btn-primary" type="submit" disabled={busy}>Link senden</button>
+			<button class="btn btn-primary" type="submit" disabled={busy} aria-busy={busy}
+				>Link senden</button
+			>
 			<a class="btn btn-link" href="/login">Zurück zur Anmeldung</a>
 		</form>
 	{/if}

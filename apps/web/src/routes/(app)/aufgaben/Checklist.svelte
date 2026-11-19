@@ -33,6 +33,12 @@
 	const patch = (item: CheckItem, body: Record<string, unknown>) =>
 		run(() => send('PATCH', `${base}/${item.id}`, body));
 
+	async function tick(item: CheckItem, done: boolean) {
+		saving = item.id;
+		await patch(item, { done });
+		saving = null;
+	}
+
 	function saveText(item: CheckItem) {
 		const t = (texts[item.id] ?? '').trim();
 		if (!t) texts[item.id] = item.text;
@@ -67,13 +73,18 @@
 	}
 
 	let newText = $state('');
+	let adding = $state(false);
+	// The point whose checkbox is being saved
+	let saving = $state<string | null>(null);
 	let addInput = $state<HTMLInputElement>();
 	async function add(e: SubmitEvent) {
 		e.preventDefault();
 		const text = newText.trim();
 		if (!text) return;
 		newText = '';
+		adding = true;
 		await run(() => post(base, { text }));
+		adding = false;
 		addInput?.focus();
 	}
 </script>
@@ -123,14 +134,20 @@
 							overIndex = null;
 						}}><Icon name="grip" size={14} /></span
 					>
-					<input
-						class="cb"
-						type="checkbox"
-						checked={item.done}
-						disabled={busy}
-						aria-label="{item.done ? 'Nicht erledigt' : 'Erledigt'}: {item.text}"
-						onchange={(e) => patch(item, { done: e.currentTarget.checked })}
-					/>
+					{#if saving === item.id}
+						<span class="cb-spin" role="status" aria-label="Wird gespeichert"
+							><span class="spinner"></span></span
+						>
+					{:else}
+						<input
+							class="cb"
+							type="checkbox"
+							checked={item.done}
+							disabled={busy}
+							aria-label="{item.done ? 'Nicht erledigt' : 'Erledigt'}: {item.text}"
+							onchange={(e) => tick(item, e.currentTarget.checked)}
+						/>
+					{/if}
 					<label class="sr-only" for="ck-t-{item.id}">Punkt {index + 1}</label>
 					<input
 						id="ck-t-{item.id}"
@@ -154,7 +171,8 @@
 		</ul>
 	{/if}
 	<form class="add" onsubmit={add}>
-		<Icon name="plus" size={18} />
+		{#if adding}<span class="spinner" role="status" aria-label="Wird gespeichert"
+			></span>{:else}<Icon name="plus" size={18} />{/if}
 		<label class="sr-only" for="ck-new">Neuer Punkt</label>
 		<input
 			id="ck-new"
@@ -255,6 +273,14 @@
 		border-radius: 6px;
 		background: var(--surface);
 		cursor: pointer;
+	}
+	.cb-spin {
+		display: grid;
+		place-content: center;
+		flex: none;
+		width: 20px;
+		height: 20px;
+		color: var(--primary);
 	}
 	.cb:checked {
 		background: var(--primary);

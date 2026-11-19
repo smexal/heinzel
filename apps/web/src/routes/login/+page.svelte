@@ -115,7 +115,7 @@
 				/>
 			</label>
 			{#if message}<p class="notice error" role="alert">{message}</p>{/if}
-			<button class="btn btn-primary" type="submit" disabled={busy}>Weiter</button>
+			<button class="btn btn-primary" type="submit" disabled={busy} aria-busy={busy}>Weiter</button>
 			<a class="forgot" href="/passwort-vergessen">Passwort vergessen?</a>
 		</form>
 	{:else}
@@ -152,7 +152,9 @@
 				/>
 			</label>
 			{#if message}<p class="notice error" role="alert">{message}</p>{/if}
-			<button class="btn btn-primary" type="submit" disabled={busy}>Bestätigen</button>
+			<button class="btn btn-primary" type="submit" disabled={busy} aria-busy={busy}
+				>Bestätigen</button
+			>
 			<button class="btn btn-link" type="button" onclick={reset} disabled={busy}>Zurück</button>
 		</form>
 	{/if}

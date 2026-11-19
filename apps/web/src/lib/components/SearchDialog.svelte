@@ -165,6 +165,7 @@
 			bind:value={q}
 			{onkeydown}
 		/>
+		{#if loading}<span class="spinner busy" role="status" aria-label="Suche läuft"></span>{/if}
 		<button class="esc" type="button" onclick={close} aria-label="Suche schliessen">Esc</button>
 	</div>
 
@@ -189,7 +190,13 @@
 		</div>
 	{/if}
 
-	<div class="results" id="sq-results" role="listbox" aria-label="Suchergebnisse">
+	<div
+		class="results"
+		class:is-loading={loading && !!result}
+		id="sq-results"
+		role="listbox"
+		aria-label="Suchergebnisse"
+	>
 		{#if q.trim().length < 2}
 			<p class="hint">Personen, Seiten und Einträge aus allen Modulen, die du sehen darfst.</p>
 		{:else if failed}
@@ -293,6 +300,14 @@
 	}
 	.bar input::-webkit-search-cancel-button {
 		display: none;
+	}
+	.busy {
+		width: 18px;
+		height: 18px;
+		color: var(--primary);
+		animation:
+			hz-spin 0.7s linear infinite,
+			hz-fade-in 0.1s 0.15s both;
 	}
 	.esc,
 	kbd {

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { afterNavigate, goto, invalidateAll } from '$app/navigation';
-	import { page } from '$app/state';
+	import { navigating, page } from '$app/state';
 	import { ApiError, post, send } from '#lib/api.ts';
 	import { formatter } from '#lib/format.ts';
 	import Icon from '#lib/components/Icon.svelte';
@@ -59,8 +59,12 @@
 		};
 	}
 
-	async function run(fn: () => Promise<unknown>, ok?: string) {
+	// What is running, for the spinner on its button: "toggle:<id>", "delete", "add", …
+	let busyKey = $state<string | null>(null);
+
+	async function run(fn: () => Promise<unknown>, ok?: string, key?: string) {
 		busy = true;
+		busyKey = key ?? null;
 		message = null;
 		try {
 			await fn();
@@ -70,6 +74,7 @@
 			fail(e);
 		} finally {
 			busy = false;
+			busyKey = null;
 		}
 	}
 
@@ -89,6 +94,7 @@
 		const title = newTitle.trim();
 		if (!title) return;
 		busy = true;
+		busyKey = 'add';
 		message = null;
 		try {
 			await post<TaskDetail>('/aufgaben/tasks', {
@@ -105,12 +111,30 @@
 			fail(err);
 		} finally {
 			busy = false;
+			busyKey = null;
 		}
 	}
 
 	// --- task actions ------------------------------------------------------------------------
 	const toggle = (t: Task) =>
-		run(() => post(`/aufgaben/tasks/${t.id}/${t.status === 'done' ? 'reopen' : 'complete'}`));
+		run(
+			() => post(`/aufgaben/tasks/${t.id}/${t.status === 'done' ? 'reopen' : 'complete'}`),
+			undefined,
+			`toggle:${t.id}`
+		);
+
+	// While another task or list loads, the part being replaced is dimmed.
+	const target = $derived(
+		navigating.to?.url.pathname === page.url.pathname ? navigating.to.url.searchParams : null
+	);
+	const loadingDetail = $derived(
+		!!target && (target.get('aufgabe') ?? '') !== (page.url.searchParams.get('aufgabe') ?? '')
+	);
+	const loadingList = $derived(
+		!!target &&
+			((target.get('liste') ?? '') !== (page.url.searchParams.get('liste') ?? '') ||
+				(target.get('erledigte') ?? '') !== (page.url.searchParams.get('erledigte') ?? ''))
+	);
 
 	const patch = (id: string, body: Record<string, unknown>) =>
 		run(() => send('PATCH', `/aufgaben/tasks/${id}`, body));
@@ -133,10 +157,14 @@
 	}
 
 	const remove = (t: TaskDetail) =>
-		run(async () => {
-			await send('DELETE', `/aufgaben/tasks/${t.id}`);
-			await setParams({ aufgabe: null });
-		}, 'Aufgabe gelöscht.');
+		run(
+			async () => {
+				await send('DELETE', `/aufgaben/tasks/${t.id}`);
+				await setParams({ aufgabe: null });
+			},
+			'Aufgabe gelöscht.',
+			'delete'
+		);
 
 	// --- display helpers ---------------------------------------------------------------------
 	const isMe = (p: Person | null) => !!p && p.id === myId;
@@ -203,8 +231,12 @@
 
 	<div class="cols">
 		<section class="listcol" aria-label="Aufgabenliste">
-			<form class="qadd" onsubmit={add}>
-				<Icon name="plus" />
+			<form class="qadd" onsubmit={add} aria-busy={busyKey === 'add'}>
+				{#if busyKey === 'add'}<span
+						class="spinner add-spin"
+						role="status"
+						aria-label="Wird gespeichert"
+					></span>{:else}<Icon name="plus" />{/if}
 				<label class="sr-only" for="na">Neue Aufgabe</label>
 				<input
 					id="na"
@@ -241,17 +273,23 @@
 			</div>
 
 			{#if tasks.length}
-				<ul class="tasks">
+				<ul class="tasks" class:is-loading={loadingList}>
 					{#each tasks as t (t.id)}
 						<li class="tk" class:sel={detail?.id === t.id}>
-							<input
-								class="cb"
-								type="checkbox"
-								checked={t.status === 'done'}
-								disabled={busy}
-								onchange={() => toggle(t)}
-								aria-label="{t.status === 'done' ? 'Wieder öffnen' : 'Erledigt'}: {t.title}"
-							/>
+							{#if busyKey === `toggle:${t.id}`}
+								<span class="cb-spin" role="status" aria-label="Wird gespeichert"
+									><span class="spinner"></span></span
+								>
+							{:else}
+								<input
+									class="cb"
+									type="checkbox"
+									checked={t.status === 'done'}
+									disabled={busy}
+									onchange={() => toggle(t)}
+									aria-label="{t.status === 'done' ? 'Wieder öffnen' : 'Erledigt'}: {t.title}"
+								/>
+							{/if}
 							<button type="button" class="tbtn" onclick={() => select(t)}>
 								<span class="tt" class:done={t.status === 'done'}>{t.title}</span>
 								<span class="meta">
@@ -294,7 +332,13 @@
 			{/if}
 		</section>
 
-		<section class="card detail" class:none={!detail} aria-label="Details" bind:this={detailEl}>
+		<section
+			class="card detail"
+			class:none={!detail}
+			class:is-loading={loadingDetail}
+			aria-label="Details"
+			bind:this={detailEl}
+		>
 			{#if detail}
 				<div class="dhead">
 					<span class="eyebrow">{detail.list_name}</span>
@@ -379,8 +423,12 @@
 					{#if detail.can_delete}
 						{#if confirmDelete}
 							<span class="confirm">
-								<button class="btn btn-danger" type="button" onclick={() => remove(detail)}
-									>Endgültig löschen</button
+								<button
+									class="btn btn-danger"
+									type="button"
+									disabled={busy}
+									aria-busy={busyKey === 'delete'}
+									onclick={() => remove(detail)}>Endgültig löschen</button
 								>
 								<button class="btn btn-link" type="button" onclick={() => (confirmDelete = false)}
 									>Abbrechen</button
@@ -400,6 +448,7 @@
 						class="btn btn-primary"
 						type="button"
 						disabled={busy}
+						aria-busy={busyKey === `toggle:${detail.id}`}
 						onclick={() => toggle(detail)}
 						>{detail.status === 'done' ? 'Wieder öffnen' : 'Als erledigt markieren'}</button
 					>
@@ -485,6 +534,20 @@
 		font: inherit;
 		font-size: 16px;
 		color: var(--ink);
+	}
+	.add-spin {
+		width: 20px;
+		height: 20px;
+		margin: 2px;
+	}
+	.cb-spin {
+		display: grid;
+		place-content: center;
+		flex: none;
+		width: 22px;
+		height: 22px;
+		margin-top: 1px;
+		color: var(--primary);
 	}
 	.due-in {
 		min-height: 36px;

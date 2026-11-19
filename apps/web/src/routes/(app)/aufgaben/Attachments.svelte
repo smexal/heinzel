@@ -60,6 +60,7 @@
 		input.value = '';
 		if (!chosen.length) return;
 		const id = task.id;
+		uploading = chosen.length;
 		await run(
 			async () => {
 				const ids: string[] = [];
@@ -83,10 +84,18 @@
 			},
 			chosen.length > 1 ? `${chosen.length} Dateien angehängt.` : 'Datei angehängt.'
 		);
+		uploading = 0;
 	}
 
-	const remove = (attId: string) =>
-		run(() => send('DELETE', `/aufgaben/tasks/${task.id}/attachments/${attId}`));
+	// Uploads in progress (count) and the attachment being removed, for their indicators
+	let uploading = $state(0);
+	let removing = $state<string | null>(null);
+
+	async function remove(attId: string) {
+		removing = attId;
+		await run(() => send('DELETE', `/aufgaben/tasks/${task.id}/attachments/${attId}`));
+		removing = null;
+	}
 </script>
 
 <section class="att" aria-labelledby="att-h">
@@ -107,7 +116,11 @@
 						class="rm"
 						aria-label="Anhang entfernen: {a.filename}"
 						disabled={busy}
-						onclick={() => remove(a.id)}><Icon name="x" size={16} /></button
+						onclick={() => remove(a.id)}
+						>{#if removing === a.id}<span class="spinner"></span>{:else}<Icon
+								name="x"
+								size={16}
+							/>{/if}</button
 					>
 				</figure>
 			{/each}
@@ -128,15 +141,28 @@
 						class="x"
 						aria-label="Anhang entfernen: {a.filename}"
 						disabled={busy}
-						onclick={() => remove(a.id)}><Icon name="x" size={16} /></button
+						onclick={() => remove(a.id)}
+						>{#if removing === a.id}<span class="spinner"></span>{:else}<Icon
+								name="x"
+								size={16}
+							/>{/if}</button
 					>
 				</li>
 			{/each}
 		</ul>
 	{/if}
 
+	{#if uploading}
+		<p class="up" role="status">
+			<span class="spinner"></span>
+			{uploading > 1
+				? `${uploading} Dateien werden hochgeladen und geprüft …`
+				: 'Datei wird hochgeladen und geprüft …'}
+		</p>
+	{/if}
+
 	<div class="adds">
-		<label class="add camera">
+		<label class="add camera" class:disabled={busy}>
 			<Icon name="camera" size={18} />
 			<span>Foto aufnehmen</span>
 			<input
@@ -148,7 +174,7 @@
 				onchange={upload}
 			/>
 		</label>
-		<label class="add">
+		<label class="add" class:disabled={busy}>
 			<Icon name="paperclip" size={18} />
 			<span>Datei hinzufügen</span>
 			<input
@@ -318,6 +344,19 @@
 		.camera {
 			display: none;
 		}
+	}
+	.up {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		margin: 0;
+		color: var(--primary-strong);
+		font-size: 14px;
+		font-weight: 600;
+	}
+	.add.disabled {
+		opacity: 0.6;
+		cursor: progress;
 	}
 	small {
 		color: var(--muted);

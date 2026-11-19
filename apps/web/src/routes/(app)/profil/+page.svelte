@@ -279,7 +279,9 @@
 				<button class="btn btn-secondary" type="button" onclick={resetPrefs} disabled={saving}
 					>Alles auf Standard zurücksetzen</button
 				>
-				<button class="btn btn-primary" type="submit" disabled={saving || !dirty}>Speichern</button>
+				<button class="btn btn-primary" type="submit" disabled={saving || !dirty} aria-busy={saving}
+					>Speichern</button
+				>
 			</div>
 		</form>
 	{:else if tab === 'appearance'}
@@ -351,7 +353,9 @@
 						</p>
 					{/if}
 					<div class="actions">
-						<button class="btn btn-primary" type="submit" disabled={pwBusy}>Passwort ändern</button>
+						<button class="btn btn-primary" type="submit" disabled={pwBusy} aria-busy={pwBusy}
+							>Passwort ändern</button
+						>
 					</div>
 				</form>
 			</section>

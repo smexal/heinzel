@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { page } from '$app/state';
+	import { navigating, page } from '$app/state';
 	import { get } from '#lib/api.ts';
 	import { actionLabel, CHANNELS, FAILURE_REASONS, PERIODS, apiQuery } from '#lib/audit.ts';
 	import Icon from '#lib/components/Icon.svelte';
@@ -201,7 +201,7 @@
 	</div>
 
 	<div class="card table-wrap">
-		<table>
+		<table class:is-loading={navigating.to?.url.pathname === page.url.pathname}>
 			<thead>
 				<tr>
 					<th scope="col">Zeit</th>
@@ -285,8 +285,12 @@
 	<div class="foot">
 		<span>{events.length} Ereignisse angezeigt</span>
 		{#if nextBefore !== null}
-			<button class="btn btn-secondary" type="button" onclick={loadOlder} disabled={loading}
-				>Ältere laden</button
+			<button
+				class="btn btn-secondary"
+				type="button"
+				onclick={loadOlder}
+				disabled={loading}
+				aria-busy={loading}>Ältere laden</button
 			>
 		{/if}
 	</div>

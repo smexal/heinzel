@@ -58,6 +58,8 @@
 	}
 
 	let busy = $state(false);
+	// The button whose action runs (for its spinner): true = save/activate, false = deactivate
+	let busyEnable = $state<boolean | null>(null);
 	let message = $state<{ tone: 'ok' | 'error'; text: string } | null>(null);
 
 	const ERRORS: Record<string, string> = {
@@ -69,6 +71,7 @@
 	async function save(enabled: boolean) {
 		const m = selected;
 		busy = true;
+		busyEnable = enabled;
 		message = null;
 		try {
 			await put(`/admin/modules/${m.key}`, {
@@ -105,6 +108,7 @@
 			};
 		} finally {
 			busy = false;
+			busyEnable = null;
 		}
 	}
 
@@ -265,12 +269,14 @@
 								class="btn btn-secondary danger"
 								type="button"
 								disabled={busy}
+								aria-busy={busyEnable === false}
 								onclick={() => save(false)}>Modul deaktivieren</button
 							>
 							<button
 								class="btn btn-primary"
 								type="button"
 								disabled={busy}
+								aria-busy={busyEnable === true}
 								onclick={() => save(true)}>Speichern</button
 							>
 						{:else}
@@ -278,6 +284,7 @@
 								class="btn btn-primary"
 								type="button"
 								disabled={busy}
+								aria-busy={busyEnable === true}
 								onclick={() => save(true)}>Modul aktivieren</button
 							>
 						{/if}

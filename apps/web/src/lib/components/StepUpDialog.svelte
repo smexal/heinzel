@@ -79,7 +79,9 @@
 		{#if error}<p class="notice error" role="alert">{error}</p>{/if}
 		<div class="buttons">
 			<button class="btn btn-secondary" type="button" onclick={cancelStepUp}>Abbrechen</button>
-			<button class="btn btn-primary" type="submit" disabled={busy}>Bestätigen</button>
+			<button class="btn btn-primary" type="submit" disabled={busy} aria-busy={busy}
+				>Bestätigen</button
+			>
 		</div>
 	</form>
 </dialog>

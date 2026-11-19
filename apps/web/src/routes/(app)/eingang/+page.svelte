@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { goto, invalidateAll } from '$app/navigation';
-	import { page } from '$app/state';
+	import { navigating, page } from '$app/state';
 	import { ApiError, post } from '#lib/api.ts';
 	import { formatter } from '#lib/format.ts';
 	import { renderMarkdown } from '#lib/markdown.ts';
@@ -17,6 +17,8 @@
 
 	let message = $state<{ tone: 'ok' | 'error'; text: string } | null>(null);
 	let busy = $state(false);
+	// "<item id>:<action>" while that button's action runs (for its spinner)
+	let busyKey = $state<string | null>(null);
 
 	function setParam(key: string, value: string | null, drop: string[] = []) {
 		const p = new URLSearchParams(page.url.search);
@@ -38,6 +40,7 @@
 
 	async function change(item: InboxItem, what: 'done' | 'reopen' | 'unread') {
 		busy = true;
+		busyKey = `${item.id}:${what}`;
 		message = null;
 		try {
 			await post(`/inbox/${item.id}/${what}`);
@@ -56,11 +59,13 @@
 			message = { tone: 'error', text: 'Das hat nicht geklappt. Bitte versuche es erneut.' };
 		} finally {
 			busy = false;
+			busyKey = null;
 		}
 	}
 
 	async function action(item: InboxItem, key: string) {
 		busy = true;
+		busyKey = `${item.id}:action:${key}`;
 		message = null;
 		try {
 			const r = await post<{ message: string }>(`/inbox/${item.id}/actions/${key}`);
@@ -79,14 +84,24 @@
 			};
 		} finally {
 			busy = false;
+			busyKey = null;
 		}
 	}
 
+	let readingAll = $state(false);
 	async function readAll() {
 		const source = page.url.searchParams.get('quelle');
-		await post(`/inbox/read-all${source ? `?source=${encodeURIComponent(source)}` : ''}`);
-		await invalidateAll();
+		readingAll = true;
+		try {
+			await post(`/inbox/read-all${source ? `?source=${encodeURIComponent(source)}` : ''}`);
+			await invalidateAll();
+		} finally {
+			readingAll = false;
+		}
 	}
+
+	// While another entry or view loads, the current content is dimmed.
+	const switching = $derived(navigating.to?.url.pathname === page.url.pathname);
 
 	const VIEWS = [
 		{ key: 'open', label: 'Offen' },
@@ -128,8 +143,12 @@
 					</select>
 				</label>
 			{/if}
-			<button class="btn btn-secondary" type="button" onclick={readAll} disabled={!counts.unread}
-				>Alle als gelesen markieren</button
+			<button
+				class="btn btn-secondary"
+				type="button"
+				onclick={readAll}
+				disabled={!counts.unread || readingAll}
+				aria-busy={readingAll}>Alle als gelesen markieren</button
 			>
 		</div>
 	</header>
@@ -201,7 +220,7 @@
 
 		{#if selected}
 			{@const i = selected}
-			<section class="detail card" aria-labelledby="dt-h">
+			<section class="detail card" class:is-loading={switching} aria-labelledby="dt-h">
 				<div class="dhead">
 					<div class="tags">
 						{#if i.severity === 'urgent'}<span class="chip danger">Dringend</span>{/if}
@@ -256,6 +275,7 @@
 								class="btn btn-secondary"
 								type="button"
 								disabled={busy}
+								aria-busy={busyKey === `${i.id}:reopen`}
 								onclick={() => change(i, 'reopen')}>Wieder öffnen</button
 							>
 						{:else}
@@ -264,6 +284,7 @@
 									class="btn {buttonClass(a.style)}"
 									type="button"
 									disabled={busy}
+									aria-busy={busyKey === `${i.id}:action:${a.key}`}
 									onclick={() => action(i, a.key)}>{a.label}</button
 								>
 							{/each}
@@ -271,6 +292,7 @@
 								class="btn {i.actions.length ? 'btn-secondary' : 'btn-primary'}"
 								type="button"
 								disabled={busy}
+								aria-busy={busyKey === `${i.id}:done`}
 								onclick={() => change(i, 'done')}
 								>{i.kind === 'task' ? 'Erledigt' : 'Archivieren'}</button
 							>

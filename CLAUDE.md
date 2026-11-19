@@ -64,6 +64,10 @@ pnpm check:web && pnpm build:web
 - Svelte: runes only (`$state`, `$derived`, `$props`), `#lib/...` imports, component-scoped CSS on tokens.
 - Encrypted fields (`crypto.encrypt`) must be listed in `transfer.SECRETS` (or `_rekey`), so an import
   into an installation with another `HEINZEL_SECRET_KEY` keeps them readable.
+- Loading states: the button that started an action gets `aria-busy` (spinner via `layout.css`), other
+  controls just `disabled`; inline waits use `.spinner`; content being replaced by a navigation gets
+  `.is-loading` (dims after 150 ms); page navigations show the top bar from the root layout. Track
+  which action runs with a key (`busyKey`) when several buttons share one `busy` flag.
 - User text as HTML only through `renderMarkdown()` (`#lib/markdown.ts`); no other `{@html}` with user data.
 - Accessibility: real buttons/links/labels, 44 px touch targets, WCAG AA in light and dark.
 - Tests next to every feature: pytest for the API, `pnpm check` must stay green.
