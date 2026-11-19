@@ -15,14 +15,18 @@
 		value: string;
 		label?: string;
 		placeholder?: string;
-		onsave: (value: string) => void;
+		/** Saves the note; the component shows the new text with a spinner until it resolves. */
+		onsave: (value: string) => void | Promise<unknown>;
 	} = $props();
 
 	const uid = $props.id();
 	let editing = $state(false);
 	let draft = $state('');
 	let area = $state<HTMLTextAreaElement>();
-	const html = $derived(renderMarkdown(value));
+	// The text being saved: shown right away (dimmed) until the saved value comes back.
+	let pending = $state<string | null>(null);
+	const shown = $derived(pending ?? value);
+	const html = $derived(renderMarkdown(shown));
 
 	async function edit() {
 		draft = value;
@@ -33,9 +37,15 @@
 		area?.setSelectionRange(draft.length, draft.length);
 	}
 
-	function finish() {
+	async function finish() {
 		editing = false;
-		if (draft !== value) onsave(draft);
+		if (draft === value) return;
+		pending = draft;
+		try {
+			await onsave(draft);
+		} finally {
+			pending = null;
+		}
 	}
 
 	function grow() {
@@ -133,6 +143,8 @@
 				>
 				<button type="button" class="done" onclick={() => area?.blur()}>Fertig</button>
 			</div>
+		{:else if pending !== null}
+			<span class="saving" role="status"><span class="spinner"></span> Wird gespeichert …</span>
 		{:else if value}
 			<button type="button" class="btn btn-link edit" onclick={edit}>Bearbeiten</button>
 		{/if}
@@ -152,14 +164,16 @@
 		<small id="{uid}-h"
 			>**fett**, *kursiv*, - Liste, 1. Liste, [Text](https://…), Zeilenumbruch mit Enter</small
 		>
-	{:else if value}
+	{:else if shown}
 		<!-- Rendered from escaped text: renderMarkdown never passes user HTML through. -->
 		<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 		<div
 			class="md"
+			class:pending={pending !== null}
 			aria-labelledby="{uid}-l"
+			aria-busy={pending !== null}
 			onclick={(e) => {
-				if (!(e.target as HTMLElement).closest('a')) edit();
+				if (pending === null && !(e.target as HTMLElement).closest('a')) edit();
 			}}
 		>
 			{@html html}
@@ -266,6 +280,19 @@
 		line-height: 1.55;
 		cursor: text;
 		overflow-wrap: anywhere;
+	}
+	.md.pending {
+		opacity: 0.65;
+		cursor: progress;
+	}
+	.saving {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		min-height: 32px;
+		color: var(--primary-strong);
+		font-size: 13px;
+		font-weight: 600;
 	}
 	.md:hover {
 		border-color: var(--input);
