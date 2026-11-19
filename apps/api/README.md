@@ -5,6 +5,8 @@ FastAPI core: tenants, identity, permissions, audit, module host, MCP gateway (l
 ```bash
 uv sync
 uv run heinzel migrate                 # core (schema core, role heinzel_app, RLS), then every module
+uv run heinzel export [--out DIR|FILE] [--keep N]   # all data and files into one .tar.gz (var/exports/)
+uv run heinzel import FILE [--replace] [--source-key KEY]   # replace all data with an export
 uv run heinzel run-jobs [aufgaben.reminders]   # module jobs once (the API also runs them itself)
 uv run heinzel seed-tenants            # register tenants/<slug> (settings only for new tenants)
 uv run heinzel seed-tenants --reset-config   # overwrite settings and logos from tenants/<slug>
@@ -114,3 +116,18 @@ with the core services directly. Its tables live in schema `mod_<id>` with migra
 
 Jobs run inside each API process every few minutes (not in tests, `HEINZEL_JOBS_ENABLED=false`
 turns them off); an advisory lock makes sure only one process runs a job at a time.
+
+## Export and import
+
+`heinzel_api.transfer` writes one `.tar.gz`: `manifest.json` (versions, migration state, a check
+value of the secret key, tables and files with row counts and SHA-256), every core and module
+table in PostgreSQL COPY format (`db/<schema>.<table>`, found from the catalogue in foreign-key
+order, so new tables are included without changes here) and the stored files. It reads in one
+repeatable-read transaction, tenant by tenant for tables under row level security, so it can run
+while the portal is in use; sign-in sessions are left out.
+
+The import checks every checksum and that the target's migrations match, then, in one
+transaction, lifts forced RLS and user triggers (the audit log's append-only guard), truncates,
+loads in order, resets sequences, re-encrypts secrets for the target key and restores RLS and
+triggers. Files are written to storage afterwards. When you add a field encrypted with
+`crypto.encrypt`, add it to `transfer.SECRETS` (or `_rekey`) so moves keep it readable.

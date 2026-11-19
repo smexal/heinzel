@@ -1,0 +1,130 @@
+# Heinzel, production on one server. Everything runs in containers; Caddy terminates HTTPS
+# with a certificate from Let's Encrypt. Settings and secrets: deploy/.env (see
+# deploy/.env.example). Operate it with deploy/heinzel.sh, see deploy/README.md.
+#
+#   deploy/heinzel.sh up        build and start (migrations and tenant seed run first)
+#   deploy/heinzel.sh export    a full export into ./backups (also runs daily by itself)
+name: heinzel
+
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "10m", max-file: "5" }
+
+x-api-image: &api-image
+  image: heinzel/api:local
+  build: { context: ., dockerfile: apps/api/Dockerfile }
+
+x-api-env: &api-env
+  HEINZEL_ENV: prod
+  HEINZEL_DATABASE_URL: postgresql+psycopg://heinzel_app:${HEINZEL_APP_DB_PASSWORD:?set in deploy/.env}@postgres:5432/heinzel
+  HEINZEL_MIGRATION_DATABASE_URL: postgresql+psycopg://heinzel:${POSTGRES_PASSWORD:?set in deploy/.env}@postgres:5432/heinzel
+  HEINZEL_APP_DB_PASSWORD: ${HEINZEL_APP_DB_PASSWORD}
+  HEINZEL_SECRET_KEY: ${HEINZEL_SECRET_KEY:?set in deploy/.env}
+  HEINZEL_VALKEY_URL: redis://valkey:6379/0
+  HEINZEL_FILES_DIR: /data/files
+  HEINZEL_CLAMD_HOST: clamav
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: heinzel
+      POSTGRES_USER: heinzel
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U heinzel"]
+      interval: 5s
+      retries: 20
+    restart: unless-stopped
+    logging: *logging
+
+  valkey:
+    image: valkey/valkey:8-alpine
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      retries: 10
+    restart: unless-stopped
+    logging: *logging
+
+  clamav:
+    # Virus scan for every upload (required in prod). Needs about 1.5 to 2 GB RAM; loading
+    # the signatures takes a few minutes after the first start. Until then uploads answer
+    # "scan_unavailable".
+    image: clamav/clamav:stable
+    volumes: [clamav:/var/lib/clamav]
+    restart: unless-stopped
+    logging: *logging
+
+  migrate:
+    # Runs once per `up`: migrations, then tenants/<slug> (domains, system roles).
+    <<: *api-image
+    environment: *api-env
+    command: ["sh", "-c", "heinzel migrate && heinzel seed-tenants"]
+    volumes: [files:/data/files]
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: "no"
+    logging: *logging
+
+  api:
+    <<: *api-image
+    environment: *api-env
+    volumes: [files:/data/files]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      valkey: { condition: service_healthy }
+      clamav: { condition: service_started }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 10s
+      retries: 10
+    restart: unless-stopped
+    logging: *logging
+
+  web:
+    image: heinzel/web:local
+    build: { context: ., dockerfile: apps/web/Dockerfile }
+    environment:
+      API_URL: http://api:8000
+    depends_on:
+      api: { condition: service_healthy }
+    restart: unless-stopped
+    logging: *logging
+
+  proxy:
+    image: caddy:2-alpine
+    ports: ["80:80", "443:443", "443:443/udp"]
+    environment:
+      HEINZEL_DOMAIN: ${HEINZEL_DOMAIN:?set in deploy/.env}
+      ACME_EMAIL: ${ACME_EMAIL:?set in deploy/.env}
+    volumes:
+      - ./deploy/Caddyfile.prod:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [web, api]
+    restart: unless-stopped
+    logging: *logging
+
+  backup:
+    # A full export (database and files) every day into ./backups, the newest
+    # BACKUP_KEEP are kept. Copy them off the server regularly.
+    <<: *api-image
+    environment: *api-env
+    command:
+      - sh
+      - -c
+      - while true; do heinzel export --out /backups --keep "${BACKUP_KEEP:-14}"; sleep 86400; done
+    volumes: [files:/data/files, ./backups:/backups]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    restart: unless-stopped
+    logging: *logging
+
+volumes:
+  pgdata:
+  files:
+  clamav:
+  caddy_data:
+  caddy_config:

@@ -21,3 +21,6 @@ Thumbs.db
 
 # Local data (uploaded files in dev)
 var/
+
+# Production exports (deploy/heinzel.sh, backup service)
+backups/

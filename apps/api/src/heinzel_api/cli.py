@@ -8,6 +8,8 @@ reindex-search              rebuild the search index of the core (people) for al
 files verify                check that every stored file exists and matches its checksum
 files copy --to DIR         copy all files into another directory (moving storage)
 demo-inbox                  example items for a user's Mein Eingang
+export [--out DIR|FILE]     all data (database and files) into one .tar.gz
+import FILE [--replace]     replace all data with an export (after `migrate`)
 
 Every command except migrate refuses to run while migrations are pending.
 """
@@ -22,7 +24,7 @@ from pathlib import Path
 from alembic import command
 from sqlalchemy import select
 
-from heinzel_api import audit, identity, migrate, rbac, search
+from heinzel_api import audit, identity, migrate, rbac, search, transfer
 from heinzel_api.config import Settings, get_settings
 from heinzel_api.db import make_sessionmaker, tenant_session
 from heinzel_api.files import LocalStorage, Storage, make_storage
@@ -312,6 +314,19 @@ def main(argv: list[str] | None = None) -> int:
     di.add_argument("--email", required=True)
     rj = sub.add_parser("run-jobs", help="run the modules' scheduled jobs once")
     rj.add_argument("job", nargs="?", help="only this job, e.g. aufgaben.reminders")
+    ex = sub.add_parser("export", help="all data (database and files) into one .tar.gz")
+    ex.add_argument(
+        "--out", type=Path, default=None, help="file or directory (default var/exports/)"
+    )
+    ex.add_argument(
+        "--keep", type=int, default=None, help="keep only the newest N exports in the directory"
+    )
+    im = sub.add_parser("import", help="replace all data with an export")
+    im.add_argument("file", type=Path)
+    im.add_argument("--replace", action="store_true", help="overwrite a database that has users")
+    im.add_argument(
+        "--source-key", default=None, help="HEINZEL_SECRET_KEY of the exporting installation"
+    )
     sub.add_parser("reindex-search", help="rebuild the core's search index (people)")
     fl = sub.add_parser("files", help="check or move stored files")
     fsub = fl.add_subparsers(dest="files_cmd", required=True)
@@ -352,6 +367,49 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "demo-inbox":
         n = demo_inbox(settings, args.tenant, args.email)
         print(f"✓ {n} Beispiel-Einträge für {args.email}")
+    elif args.cmd == "export":
+        out = args.out or settings.files_dir.parent / "exports"
+        if out.suffix != ".gz":
+            out.mkdir(parents=True, exist_ok=True)
+        m = transfer.export(
+            settings.migration_database_url,
+            settings.secret_key,
+            make_storage(settings),
+            settings.modules_dir,
+            out,
+        )
+        rows = sum(t["rows"] for t in m["tables"])
+        print(
+            f"✓ {m['path']}: {len(m['tables'])} Tabellen, {rows} Zeilen, {len(m['files'])} Dateien"
+        )
+        for p in m["problems"]:
+            print(f"! {p}", file=sys.stderr)
+        if args.keep and out.is_dir():
+            old = sorted(out.glob("heinzel-export-*.tar.gz"))[: -args.keep]
+            for f in old:
+                f.unlink()
+            if old:
+                print(f"  {len(old)} ältere Exporte gelöscht")
+    elif args.cmd == "import":
+        try:
+            r = transfer.import_(
+                args.file,
+                settings.migration_database_url,
+                settings.secret_key,
+                make_storage(settings),
+                settings.modules_dir,
+                replace=args.replace,
+                source_key=args.source_key,
+            )
+        except transfer.TransferError as e:
+            print(f"✗ Import abgebrochen: {e}", file=sys.stderr)
+            return 2
+        print(
+            f"✓ Import vom {r['created_at'][:16].replace('T', ' ')}: {r['tables']} Tabellen, "
+            f"{r['rows']} Zeilen, {r['files']} Dateien"
+            + (" (Geheimnisse neu verschlüsselt)" if r["rekeyed"] else "")
+        )
+        print("Danach die API neu starten; alle melden sich neu an.")
     elif args.cmd == "run-jobs":
         return run_jobs(settings, args.job)
     elif args.cmd == "reindex-search":

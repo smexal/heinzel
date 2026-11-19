@@ -1,0 +1,22 @@
+# Production: HTTPS for HEINZEL_DOMAIN (one or more, comma separated) with automatic
+# certificates. /api to FastAPI, everything else to SvelteKit. Caddy keeps the Host header and
+# sets X-Forwarded-For/-Host/-Proto, which the API and the web server rely on.
+{
+	email {$ACME_EMAIL}
+}
+
+{$HEINZEL_DOMAIN} {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+	handle {
+		reverse_proxy web:3000
+	}
+}

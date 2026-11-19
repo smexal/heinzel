@@ -40,6 +40,15 @@ docker compose exec api heinzel create-admin --tenant schmelzi --email you@schme
 
 Mail sent in dev (invitations, password reset) is caught by Mailpit: http://localhost:8025
 
+## Production and moving data
+
+`compose.prod.yml` runs everything on one server behind Caddy with HTTPS, ClamAV and a daily
+backup; `deploy/heinzel.sh` operates it. Step by step: [deploy/README.md](deploy/README.md).
+
+Data moves between installations as one file: `pnpm heinzel export` (all tenants' database rows
+and stored files into `var/exports/`), `heinzel import FILE` on the other side. Both must run the
+same version; secrets are re-encrypted for the target's `HEINZEL_SECRET_KEY`.
+
 **Tenant settings** live in the database. `tenants/<slug>/tenant.json` and its `assets/` only seed a
 new tenant; afterwards admins change them under Administration › Einstellungen. To start over from
 the files: `cd apps/api && uv run heinzel seed-tenants --reset-config`.
